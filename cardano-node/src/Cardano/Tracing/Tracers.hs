@@ -449,6 +449,7 @@ mkTracers _ TracingOff _ _ _ enableP2P =
     , nodeToClientTracers = NodeToClient.Tracers
       { NodeToClient.tChainSyncTracer = nullTracer
       , NodeToClient.tTxSubmissionTracer = nullTracer
+      , NodeToClient.tTxMonitorTracer = nullTracer
       , NodeToClient.tStateQueryTracer = nullTracer
       }
     , nodeToNodeTracers = NodeToNode.Tracers
@@ -1269,6 +1270,8 @@ nodeToClientTracers' trSel verb tr =
   , NodeToClient.tTxSubmissionTracer =
       tracerOnOff (traceLocalTxSubmissionProtocol trSel)
                   verb "LocalTxSubmissionProtocol" tr
+  , NodeToClient.tTxMonitorTracer =
+      nullTracer
   , NodeToClient.tStateQueryTracer =
       tracerOnOff (traceLocalStateQueryProtocol trSel)
                   verb "LocalStateQueryProtocol" tr
