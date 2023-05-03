@@ -94,7 +94,7 @@ runShelleyClientCommandWithDeprecationWarning =
 runDisplayVersion :: ExceptT ClientCommandErrors IO ()
 runDisplayVersion = do
     liftIO . putTextLn $ mconcat
-                [ "cardano-cli ", renderVersion version
+                [ "cardano-cli ", renderVersion version, "+cip-0094"
                 , " - ", Text.pack os, "-", Text.pack arch
                 , " - ", Text.pack compilerName, "-", renderVersion compilerVersion
                 , "\ngit rev ", gitRev
