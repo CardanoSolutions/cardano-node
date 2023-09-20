@@ -68,6 +68,7 @@ library
                         Cardano.Node.Configuration.TopologyP2P
                         Cardano.Node.Handlers.Shutdown
                         Cardano.Node.Handlers.TopLevel
+                        Cardano.Node.LedgerEvent
                         Cardano.Node.Orphans
                         Cardano.Node.Parsers
                         Cardano.Node.Pretty
@@ -152,6 +153,7 @@ library
                       , cardano-prelude
                       , cardano-protocol-tpraos >= 1.0.2
                       , cardano-slotting >= 0.1.1
+                      , cardano-strict-containers
                       , cborg ^>= 0.2.4
                       , containers
                       , contra-tracer
@@ -190,6 +192,7 @@ library
                       , safe-exceptions
                       , scientific
                       , si-timers
+                      , small-steps
                       , sop-core
                       , stm
                       , strict-sop-core
