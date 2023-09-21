@@ -231,6 +231,15 @@ executable cardano-node
                       , optparse-applicative-fork
                       , text
 
+executable cardano-events
+  import:               project-config
+  hs-source-dirs:       app
+  main-is:              cardano-events.hs
+  ghc-options:          -threaded
+                        -rtsopts
+  build-depends:        base >= 4.14 && < 4.17
+                      , cardano-node
+
 test-suite cardano-node-test
   import:               project-config
                       , maybe-unix
