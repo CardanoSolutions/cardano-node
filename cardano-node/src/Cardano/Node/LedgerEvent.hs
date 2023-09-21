@@ -30,8 +30,9 @@ module Cardano.Node.LedgerEvent (
 
 import           Cardano.Prelude hiding (All, Sum)
 
-import           Cardano.Ledger.Binary (EncCBOR(..), Version)
-import           Cardano.Ledger.Binary.Coders (Encode (..), encode, (!>))
+import           Cardano.Ledger.Binary (DecCBOR(..), EncCBOR(..), Version)
+import           Cardano.Ledger.Binary.Coders (Decode(..), Encode (..), encode, (!>),
+                   (<!), decode)
 import           Cardano.Ledger.Coin (Coin (..), DeltaCoin (..))
 import qualified Cardano.Ledger.Core as Ledger
 import           Cardano.Ledger.Core (eraProtVerLow)
@@ -103,6 +104,20 @@ instance EncCBOR LedgerEvent where
     LedgerTick ->
       Sum LedgerBody 8
 
+instance DecCBOR LedgerEvent where
+  decCBOR = decode (Summands "LedgerEvent" decRaw)
+    where
+      decRaw 0 = SumD LedgerMirDist <! From
+      decRaw 1 = SumD LedgerPoolReap <! From <! From
+      decRaw 2 = SumD LedgerIncrementalRewards <! From <! From
+      decRaw 3 = SumD LedgerDeltaRewards <! From <! From
+      decRaw 4 = SumD LedgerRestrainedRewards <! From <! From <! From
+      decRaw 5 = SumD LedgerTotalRewards <! From <! From
+      decRaw 6 = SumD LedgerStartAtEpoch <! From
+      decRaw 7 = SumD LedgerBody
+      decRaw 8 = SumD LedgerTick
+      decRaw n = Invalid n
+
 data Reward = Reward
   { rewardSource :: !RewardSource
   , rewardPool   :: !(StrictMaybe (PoolKeyHash))
@@ -113,6 +128,13 @@ data Reward = Reward
 instance EncCBOR Reward where
   encCBOR = encode . Rec
 
+instance DecCBOR Reward where
+  decCBOR =
+    decode $ RecD Reward
+      <! From
+      <! From
+      <! From
+
 -- The following must be in alphabetic order.
 data RewardSource
   = RwdLeader
@@ -121,6 +143,24 @@ data RewardSource
   | RwdTreasury
   | RwdDepositRefund
   deriving (Bounded, Enum, Eq, Ord, Show)
+
+instance EncCBOR RewardSource where
+  encCBOR = encode . \case
+    RwdLeader -> Sum RwdLeader 0
+    RwdMember -> Sum RwdMember 1
+    RwdReserves -> Sum RwdReserves 2
+    RwdTreasury -> Sum RwdTreasury 3
+    RwdDepositRefund -> Sum RwdDepositRefund 4
+
+instance DecCBOR RewardSource where
+  decCBOR = decode (Summands "RewardSource" decRaw)
+    where
+      decRaw 0 = SumD RwdLeader
+      decRaw 1 = SumD RwdMember
+      decRaw 2 = SumD RwdReserves
+      decRaw 3 = SumD RwdTreasury
+      decRaw 4 = SumD RwdDepositRefund
+      decRaw n = Invalid n
 
 type PoolKeyHash = KeyHash 'StakePool StandardCrypto
 
@@ -133,7 +173,7 @@ newtype Rewards = Rewards
   { unRewards :: Map StakeCred (Set Reward)
   }
   deriving stock (Eq, Show)
-  deriving newtype (EncCBOR)
+  deriving newtype (EncCBOR, DecCBOR)
 
 instance Ord LedgerEvent where
   a <= b = toOrdering a <= toOrdering b
