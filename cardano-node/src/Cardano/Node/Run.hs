@@ -37,6 +37,9 @@ import           Control.Monad.IO.Class (MonadIO (..))
 import           Control.Monad.Trans.Except (ExceptT, runExceptT)
 import           Control.Monad.Trans.Except.Extra (left)
 import           "contra-tracer" Control.Tracer
+import           Cardano.Ledger.Binary (serialize')
+import           System.IO (withFile, IOMode(..))
+import qualified Data.ByteString as BS
 import           Data.Either (partitionEithers)
 import           Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -97,6 +100,9 @@ import qualified Ouroboros.Consensus.Node as Node (getChainDB, run)
 import           Ouroboros.Consensus.Node.NetworkProtocolVersion
 import           Ouroboros.Consensus.Node.ProtocolInfo
 import           Ouroboros.Consensus.Util.Orphans ()
+import           Ouroboros.Consensus.HardFork.Combinator.AcrossEras (OneEraHash(..),
+                   OneEraLedgerEvent(..))
+import           Ouroboros.Consensus.TypeFamilyWrappers (unwrapLedgerEvent)
 import qualified Ouroboros.Network.Diffusion as Diffusion
 import qualified Ouroboros.Network.Diffusion.NonP2P as NonP2P
 import qualified Ouroboros.Network.Diffusion.P2P as P2P
@@ -167,18 +173,23 @@ runNode cmdPc = do
               let ProtocolInfo { pInfoConfig } = Api.protocolInfo runP
               in getNetworkMagic $ Consensus.configBlock pInfoConfig
 
-    case p of
-      SomeConsensusProtocol blk runP ->
-        handleNodeWithTracers
-          (case blk of
-            Api.CardanoBlockType -> LedgerEventHandler $ \headerHash slotNo event -> do
-              putStrLn $ "New ledger event: " <> show headerHash <> " " <> show slotNo <> " " <> show (convertAuxLedgerEvent event)
-            Api.ByronBlockType{} ->
-              discardEvent
-            Api.ShelleyBlockType{} ->
-              discardEvent
-          )
-          cmdPc nc p networkMagic runP
+    withFile "ledger_events.cbor" AppendMode $ \h -> do
+      case p of
+        SomeConsensusProtocol blk runP ->
+          handleNodeWithTracers
+            (case blk of
+              Api.CardanoBlockType -> LedgerEventHandler $ \headerHash slotNo event -> do
+                  BS.hPut h $ serialize' (eventCodecVersion event)
+                    ( getOneEraHash headerHash
+                    , slotNo
+                    , fromAuxLedgerEvent event
+                    )
+              Api.ByronBlockType{} ->
+                discardEvent
+              Api.ShelleyBlockType{} ->
+                discardEvent
+            )
+            cmdPc nc p networkMagic runP
 
 -- | Workaround to ensure that the main thread throws an async exception on
 -- receiving a SIGTERM signal.
