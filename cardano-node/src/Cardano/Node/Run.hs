@@ -89,7 +89,9 @@ import           Cardano.Tracing.Config (TraceOptions (..), TraceSelection (..))
 
 import qualified Ouroboros.Consensus.Config as Consensus
 import           Ouroboros.Consensus.Config.SupportsNode (ConfigSupportsNode (..))
-import           Ouroboros.Consensus.Ledger.Basics (AuxLedgerEvent, LedgerState)
+import           Ouroboros.Consensus.Ledger.Basics (LedgerEventHandler(..), LedgerState,
+                   discardEvent)
+import           Ouroboros.Consensus.Ledger.Extended (ExtLedgerState)
 import           Ouroboros.Consensus.Node (NetworkP2PMode (..), RunNodeArgs (..),
                    StdRunNodeArgs (..))
 import qualified Ouroboros.Consensus.Node as Node (getChainDB, run)
@@ -175,12 +177,12 @@ runNode cmdPc = do
       SomeConsensusProtocol blockType runP ->
         handleNodeWithTracers
           (case blockType of
-            Api.CardanoBlockType -> \event -> do
-              putStrLn $ "New ledger event: " <> show (convertAuxLedgerEvent event)
+            Api.CardanoBlockType -> LedgerEventHandler $ \headerHash slotNo event -> do
+              putStrLn $ "New ledger event: " <> show headerHash <> " " <> show slotNo <> " " <> show (convertAuxLedgerEvent event)
             Api.ByronBlockType{} ->
-              const $ pure ()
+              discardEvent
             Api.ShelleyBlockType{} ->
-              const $ pure ()
+              discardEvent
           )
           cmdPc nc p networkMagic blockType runP
 
@@ -206,7 +208,7 @@ handleNodeWithTracers
   :: ( TraceConstraints blk
      , Api.Protocol IO blk
      )
-  => (AuxLedgerEvent (LedgerState blk) -> IO ())
+  => LedgerEventHandler IO (ExtLedgerState blk)
   -> PartialNodeConfiguration
   -> NodeConfiguration
   -> SomeConsensusProtocol
@@ -344,7 +346,7 @@ handlePeersListSimple tr nodeKern = forever $ do
 
 handleSimpleNode
   :: forall blk p2p . Api.Protocol IO blk
-  => (AuxLedgerEvent (LedgerState blk) -> IO ())
+  => LedgerEventHandler IO (ExtLedgerState blk)
   -> Api.BlockType blk
   -> Api.ProtocolInfoArgs blk
   -> NetworkP2PMode p2p
