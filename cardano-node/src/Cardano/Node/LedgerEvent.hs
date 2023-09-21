@@ -28,6 +28,7 @@ module Cardano.Node.LedgerEvent (
   , convertPoolRewards
   , ledgerEventName
   , eventCodecVersion
+  , deserializeEvent
   , serializeEvent
   , tailEvent
   ) where

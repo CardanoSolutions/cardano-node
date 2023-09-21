@@ -273,6 +273,7 @@ test-suite cardano-node-test
                         Test.Cardano.Node.FilePermissions
                         Test.Cardano.Node.Gen
                         Test.Cardano.Node.Json
+                        Test.Cardano.Node.LedgerEvent
                         Test.Cardano.Node.POM
                         Test.Cardano.Tracing.OrphanInstances.HardFork
 
