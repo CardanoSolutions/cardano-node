@@ -6,6 +6,7 @@
 {-# LANGUAGE GADTs                      #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase                 #-}
+{-# LANGUAGE NamedFieldPuns             #-}
 {-# LANGUAGE NoImplicitPrelude          #-}
 {-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE PartialTypeSignatures      #-}
@@ -22,16 +23,19 @@ module Cardano.Node.LedgerEvent (
     ConvertLedgerEvent (..)
   , EventsConstraints
   , LedgerEvent (..)
+  , AnchoredEvent (..)
   , fromAuxLedgerEvent
   , convertPoolRewards
   , ledgerEventName
   , eventCodecVersion
+  , serializeEvent
   , tailEvent
   ) where
 
 import           Cardano.Prelude hiding (All, Sum)
 
-import           Cardano.Ledger.Binary (DecCBOR(..), EncCBOR(..), Version, unsafeDeserialize)
+import           Cardano.Ledger.Binary (DecCBOR(..), EncCBOR(..), Version, serialize',
+                                        unsafeDeserialize)
 import           Cardano.Ledger.Binary.Coders (Decode(..), Encode (..), encode, (!>),
                    (<!), decode)
 import           Cardano.Ledger.Coin (Coin (..), DeltaCoin (..))
@@ -50,6 +54,7 @@ import           Cardano.Ledger.Shelley.Rules (RupdEvent (..),
 import           Cardano.Slotting.Slot (SlotNo, EpochNo (..))
 import           Control.State.Transition (Event)
 import           Data.ByteString.Short(ShortByteString)
+import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Map.Strict as Map
 import           Data.SOP (All, K (..))
@@ -439,11 +444,43 @@ pattern LERetiredPools r u e <-
           )
       )
 
+data AnchoredEvent =
+  AnchoredEvent { headerHash :: ShortByteString
+                , slotNo :: SlotNo
+                , ledgerEvent :: LedgerEvent
+                }
+  deriving (Eq, Show)
+
+
+instance EncCBOR AnchoredEvent where
+  encCBOR = encode . Rec
+
+instance DecCBOR AnchoredEvent where
+  decCBOR =
+    decode $ RecD AnchoredEvent
+      <! From
+      <! From
+      <! From
+
+
+serializeEvent :: Version -> AnchoredEvent -> ByteString
+serializeEvent codecVersion AnchoredEvent{headerHash, slotNo, ledgerEvent} =
+  let bytes = serialize' codecVersion  headerHash <> 
+              serialize' codecVersion slotNo <>
+              serialize' codecVersion ledgerEvent
+
+      size = serialize' codecVersion (BS.length bytes)
+  in size <> bytes
+
+deserializeEvent :: Version -> ByteString -> Maybe AnchoredEvent
+deserializeEvent codecVersion bytes =
+  unsafeDeserialize codecVersion $ LBS.fromStrict $ BS.drop 5 bytes
+  
 -- IO action to read ledger events in binary form
 tailEvent :: FilePath -> IO ()
 tailEvent eventsDb =
   withFile eventsDb ReadMode $ \ h -> do
      let version = maxBound
      len :: Word32 <- unsafeDeserialize version <$> LBS.hGet h 5
-     event :: (ShortByteString, SlotNo, LedgerEvent)<- unsafeDeserialize version <$> LBS.hGet h (fromIntegral len)
+     event :: (ShortByteString, SlotNo, LedgerEvent) <- trace ("length = " <> show @_ @Text len) $ unsafeDeserialize version <$> LBS.hGet h (fromIntegral len)
      putStrLn $ "Ledger Event: " <> show @_ @Text event

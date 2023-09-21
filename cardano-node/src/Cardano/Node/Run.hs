@@ -184,14 +184,13 @@ runNode cmdPc = do
         SomeConsensusProtocol blockType runP ->
           handleNodeWithTracers
             (case blockType of
-              Api.CardanoBlockType -> LedgerEventHandler $ \headerHash slotNo event -> do
-                let codecVersion = eventCodecVersion event
-                    bytes = serialize' codecVersion
-                      ( getOneEraHash headerHash
-                      , slotNo
-                      , fromAuxLedgerEvent event
-                      )
-                BS.hPut h $ (serialize' codecVersion $ BS.length bytes) <> bytes
+              Api.CardanoBlockType -> LedgerEventHandler $ \headerHash slotNo event ->
+                maybe
+                  (pure ())
+                  (BS.hPut h
+                    . serializeEvent (eventCodecVersion event)
+                    . AnchoredEvent (getOneEraHash headerHash) slotNo)
+                  (fromAuxLedgerEvent event)
               Api.ByronBlockType{} ->
                 discardEvent
               Api.ShelleyBlockType{} ->
