@@ -28,6 +28,7 @@ module Cardano.Node.LedgerEvent (
   , convertPoolRewards
   , ledgerEventName
   , eventCodecVersion
+  , deserializeEvent
   , serializeEvent
   , tailEvent
   ) where
@@ -475,7 +476,7 @@ serializeEvent codecVersion AnchoredEvent{headerHash, slotNo, ledgerEvent} =
 deserializeEvent :: Version -> ByteString -> Maybe AnchoredEvent
 deserializeEvent codecVersion bytes =
   unsafeDeserialize codecVersion $ LBS.fromStrict $ BS.drop 5 bytes
-  
+
 -- IO action to read ledger events in binary form
 tailEvent :: FilePath -> IO ()
 tailEvent eventsDb =
