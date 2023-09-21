@@ -26,11 +26,12 @@ module Cardano.Node.LedgerEvent (
   , convertPoolRewards
   , ledgerEventName
   , eventCodecVersion
+  , tailEvent
   ) where
 
 import           Cardano.Prelude hiding (All, Sum)
 
-import           Cardano.Ledger.Binary (DecCBOR(..), EncCBOR(..), Version)
+import           Cardano.Ledger.Binary (DecCBOR(..), EncCBOR(..), Version, unsafeDeserialize)
 import           Cardano.Ledger.Binary.Coders (Decode(..), Encode (..), encode, (!>),
                    (<!), decode)
 import           Cardano.Ledger.Coin (Coin (..), DeltaCoin (..))
@@ -46,8 +47,10 @@ import           Cardano.Ledger.Shelley.Rules (RupdEvent (..),
                      ShelleyEpochEvent (..), ShelleyMirEvent (..),
                      ShelleyNewEpochEvent, ShelleyPoolreapEvent (..),
                      ShelleyTickEvent (..))
-import           Cardano.Slotting.Slot (EpochNo (..))
+import           Cardano.Slotting.Slot (SlotNo, EpochNo (..))
 import           Control.State.Transition (Event)
+import           Data.ByteString.Short(ShortByteString)
+import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Map.Strict as Map
 import           Data.SOP.Strict (All, K (..), NS(..), hcmap, hcollapse)
 import qualified Data.Set as Set
@@ -434,3 +437,12 @@ pattern LERetiredPools r u e <-
               )
           )
       )
+
+-- IO action to read ledger events in binary form
+tailEvent :: FilePath -> IO ()
+tailEvent eventsDb =
+  withFile eventsDb ReadMode $ \ h -> do
+     let version = maxBound
+     len :: Word32 <- unsafeDeserialize version <$> LBS.hGet h 5
+     event :: (ShortByteString, SlotNo, LedgerEvent)<- unsafeDeserialize version <$> LBS.hGet h (fromIntegral len)
+     putStrLn $ "Ledger Event: " <> show @_ @Text event
