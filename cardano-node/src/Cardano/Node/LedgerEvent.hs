@@ -1,16 +1,19 @@
-{-# LANGUAGE ConstraintKinds       #-}
-{-# LANGUAGE DataKinds             #-}
-{-# LANGUAGE FlexibleContexts      #-}
-{-# LANGUAGE FlexibleInstances     #-}
-{-# LANGUAGE GADTs                 #-}
-{-# LANGUAGE NoImplicitPrelude     #-}
-{-# LANGUAGE OverloadedStrings     #-}
-{-# LANGUAGE PartialTypeSignatures #-}
-{-# LANGUAGE PatternSynonyms       #-}
-{-# LANGUAGE RankNTypes            #-}
-{-# LANGUAGE ScopedTypeVariables   #-}
-{-# LANGUAGE TypeApplications      #-}
-{-# LANGUAGE UndecidableInstances  #-}
+{-# LANGUAGE ConstraintKinds            #-}
+{-# LANGUAGE DataKinds                  #-}
+{-# LANGUAGE DerivingStrategies         #-}
+{-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE GADTs                      #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE LambdaCase                 #-}
+{-# LANGUAGE NoImplicitPrelude          #-}
+{-# LANGUAGE OverloadedStrings          #-}
+{-# LANGUAGE PartialTypeSignatures      #-}
+{-# LANGUAGE PatternSynonyms            #-}
+{-# LANGUAGE RankNTypes                 #-}
+{-# LANGUAGE ScopedTypeVariables        #-}
+{-# LANGUAGE TypeApplications           #-}
+{-# LANGUAGE UndecidableInstances       #-}
 
 -- | Local representation for display purpose of cardano-ledger events.
 --
@@ -19,16 +22,21 @@ module Cardano.Node.LedgerEvent (
     ConvertLedgerEvent (..)
   , EventsConstraints
   , LedgerEvent (..)
-  , convertAuxLedgerEvent
-  , convertAuxLedgerEvent'
+  , fromAuxLedgerEvent
   , convertPoolRewards
   , ledgerEventName
+  , eventCodecVersion
   ) where
 
+import           Cardano.Prelude hiding (All, Sum)
+
+import           Cardano.Ledger.Binary (EncCBOR(..), Version)
+import           Cardano.Ledger.Binary.Coders (Encode (..), encode, (!>))
 import           Cardano.Ledger.Coin (Coin (..), DeltaCoin (..))
 import qualified Cardano.Ledger.Core as Ledger
+import           Cardano.Ledger.Core (eraProtVerLow)
 import qualified Cardano.Ledger.Credential as Ledger
-import           Cardano.Ledger.Crypto (StandardCrypto)
+import           Cardano.Ledger.Crypto (Crypto, StandardCrypto)
 import           Cardano.Ledger.Keys (KeyRole (StakePool))
 import           Cardano.Ledger.Shelley.API (InstantaneousRewards (..), KeyHash)
 import           Cardano.Ledger.Shelley.Core (EraCrypto)
@@ -37,19 +45,19 @@ import           Cardano.Ledger.Shelley.Rules (RupdEvent (..),
                      ShelleyEpochEvent (..), ShelleyMirEvent (..),
                      ShelleyNewEpochEvent, ShelleyPoolreapEvent (..),
                      ShelleyTickEvent (..))
-import           Cardano.Prelude hiding (All)
 import           Cardano.Slotting.Slot (EpochNo (..))
 import           Control.State.Transition (Event)
 import qualified Data.Map.Strict as Map
 import           Data.SOP (All, K (..))
-import           Data.SOP.Strict (hcmap, hcollapse)
+import           Data.SOP.Strict (NS(..), hcmap, hcollapse)
 import qualified Data.Set as Set
 import           Data.Maybe.Strict(StrictMaybe(..))
 import           Ouroboros.Consensus.Byron.Ledger.Block (ByronBlock)
 import           Ouroboros.Consensus.Cardano.Block (AllegraEra, AlonzoEra,
-                     BabbageEra, ConwayEra, HardForkBlock, MaryEra, ShelleyEra)
+                     BabbageEra, CardanoEras, ConwayEra, HardForkBlock,
+                     MaryEra, ShelleyEra)
 import           Ouroboros.Consensus.HardFork.Combinator.AcrossEras
-                     (getOneEraLedgerEvent)
+                     (OneEraLedgerEvent(..))
 import           Ouroboros.Consensus.Ledger.Abstract (AuxLedgerEvent,
                      LedgerState)
 import           Ouroboros.Consensus.Shelley.Ledger (ShelleyBlock,
@@ -73,12 +81,37 @@ data LedgerEvent
   | LedgerTick
   deriving (Eq, Show)
 
+-- TODO: Review encoding & make future-proof (i.e. favor records over lists/tuples)
+instance EncCBOR LedgerEvent where
+  encCBOR = encode . \case
+    LedgerMirDist rewards ->
+      Sum LedgerMirDist 0 !> To rewards
+    LedgerPoolReap epoch rewards ->
+      Sum LedgerPoolReap 1 !> To epoch !> To rewards
+    LedgerIncrementalRewards epoch rewards ->
+      Sum LedgerIncrementalRewards 2 !> To epoch !> To rewards
+    LedgerDeltaRewards epoch rewards ->
+      Sum LedgerDeltaRewards 3 !> To epoch !> To rewards
+    LedgerRestrainedRewards epoch rewards credentials ->
+      Sum LedgerRestrainedRewards 4 !> To epoch !> To rewards !> To credentials
+    LedgerTotalRewards epoch rewards ->
+      Sum LedgerTotalRewards 5 !> To epoch !> To rewards
+    LedgerStartAtEpoch epoch ->
+      Sum LedgerStartAtEpoch 6 !> To epoch
+    LedgerBody ->
+      Sum LedgerBody 7
+    LedgerTick ->
+      Sum LedgerBody 8
+
 data Reward = Reward
   { rewardSource :: !RewardSource
   , rewardPool   :: !(StrictMaybe (PoolKeyHash))
   , rewardAmount :: !Coin
   }
   deriving (Eq, Ord, Show)
+
+instance EncCBOR Reward where
+  encCBOR = encode . Rec
 
 -- The following must be in alphabetic order.
 data RewardSource
@@ -99,7 +132,8 @@ type StakeCred = Ledger.StakeCredential StandardCrypto
 newtype Rewards = Rewards
   { unRewards :: Map StakeCred (Set Reward)
   }
-  deriving (Eq, Show)
+  deriving stock (Eq, Show)
+  deriving newtype (EncCBOR)
 
 instance Ord LedgerEvent where
   a <= b = toOrdering a <= toOrdering b
@@ -129,11 +163,8 @@ ledgerEventName le =
     LedgerBody {}               -> "LedgerBody"
     LedgerTick {}               -> "LedgerTick"
 
-convertAuxLedgerEvent' :: forall xs blk . (All ConvertLedgerEvent xs, HardForkBlock xs ~ blk) => AuxLedgerEvent (LedgerState blk) -> Maybe LedgerEvent
-convertAuxLedgerEvent' = toLedgerEvent . WrapLedgerEvent @blk
-
-convertAuxLedgerEvent :: forall xs . (All ConvertLedgerEvent xs) => AuxLedgerEvent (LedgerState (HardForkBlock xs)) -> Maybe LedgerEvent
-convertAuxLedgerEvent = toLedgerEvent . WrapLedgerEvent @(HardForkBlock xs)
+fromAuxLedgerEvent :: forall xs . (All ConvertLedgerEvent xs) => AuxLedgerEvent (LedgerState (HardForkBlock xs)) -> Maybe LedgerEvent
+fromAuxLedgerEvent = toLedgerEvent . WrapLedgerEvent @(HardForkBlock xs)
 
 class ConvertLedgerEvent blk where
   toLedgerEvent :: WrapLedgerEvent blk -> Maybe LedgerEvent
@@ -200,6 +231,15 @@ instance ConvertLedgerEvent (ShelleyBlock p (BabbageEra StandardCrypto)) where
 instance ConvertLedgerEvent (ShelleyBlock p (ConwayEra StandardCrypto)) where
   -- TODO: do something with conway epoch events
   toLedgerEvent = const Nothing
+
+eventCodecVersion :: forall crypto. Crypto crypto => OneEraLedgerEvent (CardanoEras crypto) -> Version
+eventCodecVersion = \case
+  OneEraLedgerEvent (          S(Z{})     ) -> eraProtVerLow @(ShelleyEra crypto)
+  OneEraLedgerEvent (        S(S(Z{}))    ) -> eraProtVerLow @(AllegraEra crypto)
+  OneEraLedgerEvent (      S(S(S(Z{})))   ) -> eraProtVerLow @(MaryEra crypto)
+  OneEraLedgerEvent (    S(S(S(S(Z{}))))  ) -> eraProtVerLow @(AlonzoEra crypto)
+  OneEraLedgerEvent (  S(S(S(S(S(Z{}))))) ) -> eraProtVerLow @(BabbageEra crypto)
+  OneEraLedgerEvent (S(S(S(S(S(S(Z{}))))))) -> eraProtVerLow @(ConwayEra crypto)
 
 --------------------------------------------------------------------------------
 
