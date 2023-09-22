@@ -137,7 +137,6 @@ library
                       , aeson >= 1.5.6.0
                       , async
                       , base16-bytestring
-                      , binary
                       , bytestring
                       , cardano-api ^>= 8.2
                       , cardano-crypto-class
@@ -228,14 +227,15 @@ executable cardano-node
                       , optparse-applicative-fork
                       , text
 
-executable cardano-events
+executable reward-history
   import:               project-config
   hs-source-dirs:       app
-  main-is:              cardano-events.hs
+  main-is:              reward-history.hs
   ghc-options:          -threaded
                         -rtsopts
   build-depends:        base >= 4.14 && < 4.17
                       , cardano-node
+                      , pretty-simple
 
 test-suite cardano-node-test
   import:               project-config
