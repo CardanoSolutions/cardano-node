@@ -14,9 +14,10 @@ import qualified Hedgehog.Range as Range
 prop_roundtrip_LedgerEvent_CBOR :: Property
 prop_roundtrip_LedgerEvent_CBOR =
   Hedgehog.property $ do
+    version <- Hedgehog.forAll Gen.enumBounded
     event <- Hedgehog.forAll genEvent
-    footnote ("serialized event: " <> show (Hex.encode $ serializeEvent maxBound event))
-    Hedgehog.tripping event (serializeEvent maxBound) (deserializeEvent maxBound . fromStrict)
+    footnote ("serialized event: " <> show (Hex.encode $ serializeEvent version event))
+    Hedgehog.tripping event (serializeEvent version) (deserializeEvent . fromStrict)
 
 genEvent :: Hedgehog.Gen AnchoredEvent
 genEvent =

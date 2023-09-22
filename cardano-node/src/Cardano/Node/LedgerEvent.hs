@@ -35,8 +35,8 @@ module Cardano.Node.LedgerEvent (
 
 import           Cardano.Prelude hiding (All, Sum)
 
-import           Cardano.Ledger.Binary (DecCBOR(..), EncCBOR(..), Version, serialize',
-                                        unsafeDeserialize, toPlainDecoder)
+import           Cardano.Ledger.Binary (DecCBOR(..), EncCBOR(..), Version, fromCBOR,
+                   serialize', toCBOR, toPlainDecoder)
 import           Cardano.Ledger.Binary.Coders (Decode(..), Encode (..), encode, (!>),
                    (<!), decode)
 import           Cardano.Ledger.Coin (Coin (..), DeltaCoin (..))
@@ -53,10 +53,10 @@ import           Cardano.Ledger.Shelley.Rules (RupdEvent (..),
                      ShelleyNewEpochEvent, ShelleyPoolreapEvent (..),
                      ShelleyTickEvent (..))
 import           Cardano.Slotting.Slot (SlotNo, EpochNo (..))
+import qualified Codec.CBOR.Write as CBOR
 import           Codec.CBOR.Read(deserialiseFromBytes)
 import           Control.State.Transition (Event)
 import           Data.ByteString.Short(ShortByteString)
-import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Map.Strict as Map
 import           Data.SOP.Strict (All, K (..), NS(..), hcmap, hcollapse)
@@ -67,7 +67,7 @@ import           Ouroboros.Consensus.Cardano.Block (AllegraEra, AlonzoEra,
                      BabbageEra, CardanoEras, ConwayEra, HardForkBlock,
                      MaryEra, ShelleyEra)
 import           Ouroboros.Consensus.HardFork.Combinator.AcrossEras
-                     (OneEraLedgerEvent(..), OneEraHash(..))
+                     (OneEraLedgerEvent(..))
 import           Ouroboros.Consensus.Ledger.Abstract (AuxLedgerEvent,
                      LedgerState)
 import           Ouroboros.Consensus.Shelley.Ledger (ShelleyBlock,
@@ -468,19 +468,21 @@ instance DecCBOR AnchoredEvent where
 
 serializeEvent :: Version -> AnchoredEvent -> ByteString
 serializeEvent codecVersion event =
-  serialize' codecVersion event
+  CBOR.toStrictByteString (toCBOR codecVersion) <> serialize' codecVersion event
 
-deserializeEvent :: Version -> LBS.ByteString -> Maybe AnchoredEvent
-deserializeEvent codecVersion bytes =
-  case deserialiseFromBytes (toPlainDecoder codecVersion decCBOR) bytes of
-    Right (_, event) -> Just event
-    Left _ -> Nothing
-    
+deserializeEvent :: LBS.ByteString -> Maybe AnchoredEvent
+deserializeEvent bytes = do
+  case deserialiseFromBytes @Version fromCBOR bytes of
+    Right (rest, version) ->
+      case deserialiseFromBytes (toPlainDecoder version decCBOR) rest of
+        Right (_, event) -> Just event
+        Left{} -> Nothing
+    Left{} -> Nothing
+
 -- IO action to read ledger events in binary form
 tailEvent :: FilePath -> IO ()
 tailEvent eventsDb =
   withFile eventsDb ReadMode $ \ h -> LBS.hGetContents h >>= go
-
   where
     go bytes = do
      let version = maxBound
