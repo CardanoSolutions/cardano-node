@@ -179,22 +179,14 @@ runNode cmdPc = do
               let ProtocolInfo { pInfoConfig } = fst $ Api.protocolInfo @IO runP
               in getNetworkMagic $ Consensus.configBlock pInfoConfig
 
-    withFile "ledger_events.cbor" AppendMode $ \h -> do
+    streamingLedgerEvents 9999 $ \ledgerHandler ->
       case p of
         SomeConsensusProtocol blockType runP ->
           handleNodeWithTracers
             (case blockType of
-              Api.CardanoBlockType -> LedgerEventHandler $ \headerHash slotNo event ->
-                maybe
-                  (pure ())
-                  (BS.hPut h
-                    . serializeEvent (eventCodecVersion event)
-                    . AnchoredEvent (getOneEraHash headerHash) slotNo)
-                  (fromAuxLedgerEvent event)
-              Api.ByronBlockType{} ->
-                discardEvent
-              Api.ShelleyBlockType{} ->
-                discardEvent
+              Api.CardanoBlockType -> ledgerHandler
+              Api.ByronBlockType{} -> discardEvent
+              Api.ShelleyBlockType{} -> discardEvent
             )
             cmdPc nc p networkMagic blockType runP
 
