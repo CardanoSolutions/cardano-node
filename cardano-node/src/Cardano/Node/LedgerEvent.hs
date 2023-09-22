@@ -30,7 +30,7 @@ module Cardano.Node.LedgerEvent (
   , eventCodecVersion
   , deserializeEvent
   , serializeEvent
-  , foldEvent
+  , foldEvent, filterRewards
   ) where
 
 import           Cardano.Prelude hiding (All, Sum)
@@ -41,6 +41,7 @@ import           Cardano.Ledger.Binary.Coders (Decode(..), Encode (..), encode, 
                    (<!), decode)
 import           Cardano.Ledger.Coin (Coin (..), DeltaCoin (..))
 import qualified Cardano.Ledger.Core as Ledger
+import qualified Cardano.Ledger.Address as Ledger
 import           Cardano.Ledger.Core (eraProtVerLow)
 import qualified Cardano.Ledger.Credential as Ledger
 import           Cardano.Ledger.Crypto (Crypto, StandardCrypto)
@@ -59,6 +60,7 @@ import           Codec.CBOR.Read(deserialiseFromBytes)
 import           Control.State.Transition (Event)
 import           Data.ByteString.Short(ShortByteString)
 import qualified Data.ByteString.Lazy as LBS
+import qualified Data.ByteString.Base16 as Hex
 import qualified Data.Map.Strict as Map
 import           Data.SOP (All, K (..))
 import           Data.SOP.Strict (NS(..), hcmap, hcollapse)
@@ -182,6 +184,7 @@ type StakeCred = Ledger.StakeCredential StandardCrypto
 -- The `ledger-specs` code defines a `RewardUpdate` type that is parameterised over
 -- Shelley/Allegra/Mary. This is a huge pain in the neck for `db-sync` so we define a
 -- generic one instead.
+-- FIXME: use directly ledger types instead of wrapping them
 newtype Rewards = Rewards
   { unRewards :: Map StakeCred (Set Reward)
   }
@@ -512,3 +515,17 @@ foldEvent fn st0 h =
       -> IO (LBS.ByteString, a)
     unsafeDeserialiseFromBytes decoder =
       either (panic . show) pure . deserialiseFromBytes decoder
+
+filterRewards :: Coin -> AnchoredEvent -> IO Coin
+filterRewards current = \case
+  AnchoredEvent{ledgerEvent = LedgerTotalRewards _epoch rewardsMap} ->
+    pure $ maybe current ((<> current) . rewardsToCoin) $ Map.lookup stakeCred rewardsMap
+  _ -> pure current
+
+ where
+   rewardsToCoin = Set.foldr (<>) mempty . Set.map Ledger.rewardAmount
+
+   stakeCred = fromMaybe (panic "should not happen") $ do
+     case Hex.decode "e04cf4f01890215bd181d1fcd3c9589a2a4a3adbcff1a70b748080fa82" of
+       Right bytes -> Ledger.getRwdCred <$> Ledger.decodeRewardAcnt bytes
+       Left err -> panic (show err)
