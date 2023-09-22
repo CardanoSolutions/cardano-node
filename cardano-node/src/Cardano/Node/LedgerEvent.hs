@@ -36,7 +36,7 @@ module Cardano.Node.LedgerEvent (
 import           Cardano.Prelude hiding (All, Sum)
 
 import           Cardano.Ledger.Binary (DecCBOR(..), EncCBOR(..), Version, serialize',
-                                        unsafeDeserialize, toPlainDecoder)
+                                        toPlainDecoder)
 import           Cardano.Ledger.Binary.Coders (Decode(..), Encode (..), encode, (!>),
                    (<!), decode)
 import           Cardano.Ledger.Coin (Coin (..), DeltaCoin (..))
@@ -479,8 +479,13 @@ deserializeEvent codecVersion bytes =
 -- IO action to read ledger events in binary form
 tailEvent :: FilePath -> IO ()
 tailEvent eventsDb =
-  withFile eventsDb ReadMode $ \ h -> do
+  withFile eventsDb ReadMode $ \ h -> LBS.hGetContents h >>= go
+
+  where
+    go bytes = do
      let version = maxBound
-     len :: Word32 <- unsafeDeserialize version <$> LBS.hGet h 5
-     event :: (ShortByteString, SlotNo, LedgerEvent) <- trace ("length = " <> show @_ @Text len) $ unsafeDeserialize version <$> LBS.hGet h (fromIntegral len)
-     putStrLn $ "Ledger Event: " <> show @_ @Text event
+     case deserialiseFromBytes (toPlainDecoder version decCBOR) bytes of
+       Right (rest, event :: AnchoredEvent) -> do
+         putStrLn $ "Anchored Event: " <> show @_ @Text event
+         go rest
+       Left err -> putStrLn $ "FIXME: Error: " <> show @_ @Text err
