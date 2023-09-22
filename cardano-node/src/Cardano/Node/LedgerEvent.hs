@@ -30,7 +30,7 @@ module Cardano.Node.LedgerEvent (
   , eventCodecVersion
   , deserializeEvent
   , serializeEvent
-  , tailEvent
+  , foldEvent
   ) where
 
 import           Cardano.Prelude hiding (All, Sum)
@@ -53,6 +53,7 @@ import           Cardano.Ledger.Shelley.Rules (RupdEvent (..),
                      ShelleyNewEpochEvent, ShelleyPoolreapEvent (..),
                      ShelleyTickEvent (..))
 import           Cardano.Slotting.Slot (SlotNo, EpochNo (..))
+import qualified Codec.CBOR.Decoding as CBOR
 import qualified Codec.CBOR.Write as CBOR
 import           Codec.CBOR.Read(deserialiseFromBytes)
 import           Control.State.Transition (Event)
@@ -74,6 +75,7 @@ import           Ouroboros.Consensus.Ledger.Abstract (AuxLedgerEvent,
 import           Ouroboros.Consensus.Shelley.Ledger (ShelleyBlock,
                      ShelleyLedgerEvent (..))
 import           Ouroboros.Consensus.TypeFamilyWrappers
+import           System.IO(hIsEOF)
 
 data LedgerEvent
   = LedgerMirDist !(Map StakeCred (Set Reward))
@@ -481,14 +483,32 @@ deserializeEvent bytes = do
     Left{} -> Nothing
 
 -- IO action to read ledger events in binary form
-tailEvent :: FilePath -> IO ()
-tailEvent eventsDb =
-  withFile eventsDb ReadMode $ \ h -> LBS.hGetContents h >>= go
+--
+-- TODO: filter e04cf4f01890215bd181d1fcd3c9589a2a4a3adbcff1a70b748080fa82
+foldEvent :: (a -> AnchoredEvent -> IO a) -> a -> Handle -> IO ()
+foldEvent fn st0 h =
+  LBS.hGetContents h >>= go st0
   where
-    go bytes = do
-     let version = maxBound
-     case deserialiseFromBytes (toPlainDecoder version decCBOR) bytes of
-       Right (rest, event :: AnchoredEvent) -> do
-         putStrLn $ "Anchored Event: " <> show @_ @Text event
-         go rest
-       Left err -> putStrLn $ "FIXME: Error: " <> show @_ @Text err
+    go st bytes = do
+      eof <- hIsEOF h
+      if eof then
+        go st bytes
+      else do
+        (rest, version :: Version) <- unsafeDeserialiseFromBytes
+          fromCBOR
+          bytes
+
+        (events, event :: AnchoredEvent) <- unsafeDeserialiseFromBytes
+          (toPlainDecoder version decCBOR)
+          rest
+
+        st' <- fn st event
+
+        go st' events
+
+    unsafeDeserialiseFromBytes
+      :: (forall s. CBOR.Decoder s a)
+      -> LBS.ByteString
+      -> IO (LBS.ByteString, a)
+    unsafeDeserialiseFromBytes decoder =
+      either (panic . show) pure . deserialiseFromBytes decoder
