@@ -246,6 +246,7 @@ test-suite cardano-node-test
   build-depends:        base >= 4.14 && < 4.17
                       , aeson >= 1.5.6.0
                       , bytestring
+                      , base16-bytestring
                       , cardano-crypto-class
                       , cardano-api ^>= 8.2
                       , cardano-ledger-core
