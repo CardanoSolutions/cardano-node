@@ -36,7 +36,7 @@ module Cardano.Node.LedgerEvent (
 import           Cardano.Prelude hiding (All, Sum)
 
 import           Cardano.Ledger.Binary (DecCBOR(..), EncCBOR(..), Version, serialize',
-                                        unsafeDeserialize)
+                                        unsafeDeserialize, toPlainDecoder)
 import           Cardano.Ledger.Binary.Coders (Decode(..), Encode (..), encode, (!>),
                    (<!), decode)
 import           Cardano.Ledger.Coin (Coin (..), DeltaCoin (..))
@@ -53,9 +53,9 @@ import           Cardano.Ledger.Shelley.Rules (RupdEvent (..),
                      ShelleyNewEpochEvent, ShelleyPoolreapEvent (..),
                      ShelleyTickEvent (..))
 import           Cardano.Slotting.Slot (SlotNo, EpochNo (..))
+import           Codec.CBOR.Read(deserialiseFromBytes)
 import           Control.State.Transition (Event)
 import           Data.ByteString.Short(ShortByteString)
-import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Map.Strict as Map
 import           Data.SOP (All, K (..))
@@ -135,7 +135,8 @@ data Reward = Reward
   deriving (Eq, Ord, Show)
 
 instance EncCBOR Reward where
-  encCBOR = encode . Rec
+  encCBOR Reward{rewardSource, rewardPool, rewardAmount} =
+    encode $ Rec Reward !> To rewardSource !> To rewardPool !> To rewardAmount
 
 instance DecCBOR Reward where
   decCBOR =
@@ -454,7 +455,8 @@ data AnchoredEvent =
 
 
 instance EncCBOR AnchoredEvent where
-  encCBOR = encode . Rec
+  encCBOR AnchoredEvent{headerHash, slotNo, ledgerEvent} =
+    encode $  Rec AnchoredEvent !> To headerHash !> To slotNo !> To ledgerEvent
 
 instance DecCBOR AnchoredEvent where
   decCBOR =
@@ -465,17 +467,14 @@ instance DecCBOR AnchoredEvent where
 
 
 serializeEvent :: Version -> AnchoredEvent -> ByteString
-serializeEvent codecVersion AnchoredEvent{headerHash, slotNo, ledgerEvent} =
-  let bytes = serialize' codecVersion  headerHash <> 
-              serialize' codecVersion slotNo <>
-              serialize' codecVersion ledgerEvent
+serializeEvent codecVersion event =
+  serialize' codecVersion event
 
-      size = serialize' codecVersion (BS.length bytes)
-  in size <> bytes
-
-deserializeEvent :: Version -> ByteString -> Maybe AnchoredEvent
+deserializeEvent :: Version -> LBS.ByteString -> Maybe AnchoredEvent
 deserializeEvent codecVersion bytes =
-  unsafeDeserialize codecVersion $ LBS.fromStrict $ BS.drop 5 bytes
+  case deserialiseFromBytes (toPlainDecoder codecVersion decCBOR) bytes of
+    Right (_, event) -> Just event
+    Left _ -> Nothing
 
 -- IO action to read ledger events in binary form
 tailEvent :: FilePath -> IO ()

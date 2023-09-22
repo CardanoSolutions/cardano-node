@@ -250,6 +250,7 @@ test-suite cardano-node-test
   build-depends:        base
                       , aeson
                       , bytestring
+                      , base16-bytestring
                       , cardano-crypto-class
                       , cardano-api
                       , cardano-ledger-core
