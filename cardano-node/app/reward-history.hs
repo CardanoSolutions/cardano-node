@@ -1,7 +1,8 @@
 import Cardano.Node.LedgerEvent (foldEvent, filterRewards, parseStakeCredential)
 import System.Environment (getArgs)
-import System.IO (stdin)
+import System.IO (stdin, IOMode(ReadMode))
 import Text.Pretty.Simple (pPrint)
+import Network.Socket
 
 -- Usage: rewards-history <<<stdin LEDGER-EVENTS] <STAKE-ADDRESS>
 --
@@ -11,9 +12,18 @@ import Text.Pretty.Simple (pPrint)
 main :: IO ()
 main = do
   stakeCredential <- getArgs >>= expectStakeCredential . head
-  history <- foldEvent (\st -> pure . filterRewards stakeCredential st) mempty stdin
+  addrInfo <- resolve
+  putStrLn $ "connecting to " <> show addrInfo
+  sock <- openSocket addrInfo
+  connect sock $ addrAddress addrInfo
+  h <- socketToHandle sock ReadMode
+  
+  history <- foldEvent (\st -> pure . filterRewards stakeCredential st) mempty h
   pPrint history
  where
+  resolve = do
+        let hints = defaultHints { addrSocketType = Stream, addrFamily = AF_INET }
+        head <$> getAddrInfo (Just hints) (Just "localhost") (Just "9999")
   expectStakeCredential =
     maybe (error "invalid / missing stake address as 1st argument") return
     .

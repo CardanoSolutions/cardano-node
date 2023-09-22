@@ -234,6 +234,7 @@ executable reward-history
                         -rtsopts
   build-depends:        base >= 4.14 && < 4.17
                       , cardano-node
+                      , network
                       , pretty-simple
 
 test-suite cardano-node-test
