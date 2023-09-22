@@ -1,5 +1,6 @@
 import System.Environment
-import Cardano.Node.LedgerEvent (tailEvent)
+import Cardano.Node.LedgerEvent (foldEvent, filterRewards)
+import System.IO(stdin)
 
 main :: IO ()
-main = getArgs >>= tailEvent . head
+main = foldEvent filterRewards mempty stdin

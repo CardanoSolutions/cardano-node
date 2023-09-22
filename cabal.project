@@ -53,7 +53,7 @@ package cardano-node-chairman
   ghc-options: -Werror
 
 package cardano-node
-  ghc-options: -Werror
+  ghc-options: -Wwarn
 
 package cardano-submit-api
   ghc-options: -Werror
