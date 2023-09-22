@@ -33,6 +33,7 @@ module Cardano.Node.LedgerEvent (
   , foldEvent
   , filterRewards
   , parseStakeCredential
+  , streamingLedgerEvents
   ) where
 
 import           Cardano.Prelude hiding (All, Sum)
@@ -64,19 +65,22 @@ import           Control.State.Transition (Event)
 import           Data.ByteString.Short(ShortByteString)
 import qualified Data.ByteString.Char8 as B8
 import qualified Data.ByteString.Lazy as LBS
+import qualified Data.ByteString  as BS
 import qualified Data.ByteString.Base16 as Hex
 import qualified Data.Map.Strict as Map
 import           Data.SOP.Strict (All, K (..), NS(..), hcmap, hcollapse)
 import qualified Data.Set as Set
 import           Data.String (String)
+import           Network.Socket(PortNumber, defaultProtocol, listen, accept, bind, close, socket, socketToHandle, withSocketsDo, SockAddr(..), SocketType(Stream), Family(AF_INET))
 import           Ouroboros.Consensus.Byron.Ledger.Block (ByronBlock)
 import           Ouroboros.Consensus.Cardano.Block (AllegraEra, AlonzoEra,
                      BabbageEra, CardanoEras, ConwayEra, HardForkBlock,
                      MaryEra, ShelleyEra)
 import           Ouroboros.Consensus.HardFork.Combinator.AcrossEras
-                     (OneEraLedgerEvent(..))
+                     (OneEraLedgerEvent(..), getOneEraHash, getOneEraLedgerEvent)
 import           Ouroboros.Consensus.Ledger.Abstract (AuxLedgerEvent,
-                     LedgerState)
+                     LedgerState, LedgerEventHandler(..))
+import           Ouroboros.Consensus.Ledger.Extended (ExtLedgerState)
 import           Ouroboros.Consensus.Shelley.Ledger (ShelleyBlock,
                      ShelleyLedgerEvent (..))
 import           Ouroboros.Consensus.TypeFamilyWrappers
@@ -304,8 +308,8 @@ instance ConvertLedgerEvent (ShelleyBlock proto (ConwayEra StandardCrypto)) wher
   -- TODO: do something with conway epoch events
   toLedgerEvent = const Nothing
 
-eventCodecVersion
-  :: forall crypto. Crypto crypto
+eventCodecVersion ::
+     forall crypto. Crypto crypto
   => OneEraLedgerEvent (CardanoEras crypto)
   -> Version
 eventCodecVersion = \case
@@ -375,7 +379,7 @@ foldEvent fn st0 h =
         go st' events
 
     unsafeDeserialiseFromBytes
-      :: (forall s. CBOR.Decoder s a)
+      :: forall a . (forall s. CBOR.Decoder s a)
       -> LBS.ByteString
       -> IO (LBS.ByteString, a)
     unsafeDeserialiseFromBytes decoder =
@@ -395,3 +399,32 @@ filterRewards credential st = \case
     st
  where
    mergeRewards = Set.foldr (<>) mempty . Set.map Ledger.rewardAmount
+
+-- FIXME: inferred is horrible... but it does not work with a naive type declaration
+streamingLedgerEvents
+  :: PortNumber
+  -> (LedgerEventHandler IO (ExtLedgerState (HardForkBlock (CardanoEras StandardCrypto))) -> IO ())
+  -> IO ()
+streamingLedgerEvents port handler =
+ withSocketsDo $
+   bracket open closeSockets go
+
+ where
+   go (s,_) = do
+     h <- socketToHandle s WriteMode
+     let ledgerEventHandler = LedgerEventHandler $ \headerHash slotNo event -> do
+                  maybe
+                     (pure ())
+                     (\ e -> BS.hPut h $
+                               serializeEvent (eventCodecVersion event) (AnchoredEvent (getOneEraHash headerHash) slotNo e))
+                     (fromAuxLedgerEvent event)
+     handler ledgerEventHandler
+
+   open = do
+                sock <- socket AF_INET Stream defaultProtocol
+                bind sock (SockAddrInet port 0)
+                listen sock 1
+                (clientSock, _) <- accept sock
+                pure (sock, clientSock)
+
+   closeSockets (s,s') = close s >> close s'
