@@ -4,13 +4,11 @@
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GADTs                      #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE NamedFieldPuns             #-}
 {-# LANGUAGE NoImplicitPrelude          #-}
 {-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE PartialTypeSignatures      #-}
-{-# LANGUAGE PatternSynonyms            #-}
 {-# LANGUAGE RankNTypes                 #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE TypeApplications           #-}
@@ -33,7 +31,7 @@ module Cardano.Node.LedgerEvent (
   , foldEvent
   , filterRewards
   , parseStakeCredential
-  , streamingLedgerEvents
+  , withLedgerEventsServerStream
   ) where
 
 import           Cardano.Prelude hiding (All, Sum)
@@ -281,9 +279,10 @@ toLedgerEventShelley evt =
           Just $ LedgerMirDist fromReserve fromTreasury deltaReserve deltaTreasury
         NoMirTransfer{} -> -- FIXME: create an event for this
           Nothing
-    ShelleyLedgerEventTICK (TickNewEpochEvent (Shelley.EpochEvent poolReap)) ->
-      let PoolReapEvent (RetiredPools refunded unclaimed epoch) = poolReap
-       in Just $ LedgerPoolReaping epoch refunded unclaimed
+    ShelleyLedgerEventTICK (TickNewEpochEvent (Shelley.EpochEvent _poolReap)) ->
+      -- let PoolReapEvent (RetiredPools refunded unclaimed epoch) = poolReap
+      --  in Just $ LedgerPoolReaping epoch refunded unclaimed
+      Just LedgerTick
     ShelleyLedgerEventBBODY {} ->
       Just LedgerBody
     ShelleyLedgerEventTICK {} ->
@@ -354,17 +353,17 @@ deserializeEvent bytes = do
 
 -- IO action to read ledger events in binary form
 foldEvent
-  :: (a -> AnchoredEvent -> IO a)
+  :: Handle
   -> a
-  -> Handle
+  -> (a -> AnchoredEvent -> IO a)
   -> IO a
-foldEvent fn st0 h =
+foldEvent h st0 fn =
   LBS.hGetContents h >>= go st0
   where
     go st bytes = do
       eof <- hIsEOF h
       if eof then
-        return st
+        pure st
       else do
         (rest, version :: Version) <- unsafeDeserialiseFromBytes
           fromCBOR
@@ -400,31 +399,35 @@ filterRewards credential st = \case
  where
    mergeRewards = Set.foldr (<>) mempty . Set.map Ledger.rewardAmount
 
--- FIXME: inferred is horrible... but it does not work with a naive type declaration
-streamingLedgerEvents
+withLedgerEventsServerStream
   :: PortNumber
   -> (LedgerEventHandler IO (ExtLedgerState (HardForkBlock (CardanoEras StandardCrypto))) -> IO ())
   -> IO ()
-streamingLedgerEvents port handler =
- withSocketsDo $
-   bracket open closeSockets go
+withLedgerEventsServerStream port handler = do
+  withSocketsDo $ do
+    bracket open closeSockets go
 
  where
-   go (s,_) = do
-     h <- socketToHandle s WriteMode
-     let ledgerEventHandler = LedgerEventHandler $ \headerHash slotNo event -> do
-                  maybe
-                     (pure ())
-                     (\ e -> BS.hPut h $
-                               serializeEvent (eventCodecVersion event) (AnchoredEvent (getOneEraHash headerHash) slotNo e))
-                     (fromAuxLedgerEvent event)
-     handler ledgerEventHandler
+  go s = do
+    h <- socketToHandle s WriteMode
+    handler $ LedgerEventHandler $ writeLedgerEvents h
 
-   open = do
-                sock <- socket AF_INET Stream defaultProtocol
-                bind sock (SockAddrInet port 0)
-                listen sock 1
-                (clientSock, _) <- accept sock
-                pure (sock, clientSock)
+  open = do
+    sock <- socket AF_INET Stream defaultProtocol
+    bind sock (SockAddrInet port 0)
+    listen sock 1
+    putStrLn ("Waiting for client to connect to socket..." :: String)
+    (clientSock, _) <- accept sock
+    pure clientSock
 
-   closeSockets (s,s') = close s >> close s'
+  closeSockets = close
+
+  writeLedgerEvents h headerHash slotNo event = do
+    case fromAuxLedgerEvent event of
+      Nothing -> pure ()
+      Just e -> do
+        let serializedEvent =
+              serializeEvent
+                (eventCodecVersion event)
+                (AnchoredEvent (getOneEraHash headerHash) slotNo e)
+        BS.hPut h serializedEvent
