@@ -1,9 +1,10 @@
-import Cardano.Node.LedgerEvent (parseStakeCredential, foldEvent, filterRewards)
+{-# LANGUAGE LambdaCase #-}
+
+import Cardano.Node.LedgerEvent (parseStakeCredential, foldEvent, filterRewards, AnchoredEvent (AnchoredEvent), LedgerEvent (LedgerNewEpochEvent), LedgerNewEpochEvent(LedgerStakeDistEvent))
 import System.Environment (getArgs)
 import System.IO (IOMode(ReadMode))
 import Network.Socket
 import Control.Exception (bracket, bracketOnError)
-import Control.Monad (void)
 
 -- Usage: reward-history <<<stdin LEDGER-EVENTS] <STAKE-ADDRESS>
 --
@@ -19,8 +20,9 @@ main = do
     h <- socketToHandle sock ReadMode
 
     putStrLn "Getting reward history..."
-    void $ foldEvent h mempty $ \st e -> let r = filterRewards stakeCredential st e in print r >> pure r
-    -- foldEvent h () $ \() e -> print e
+    -- void $ foldEvent h mempty $ \st e -> let r = filterRewards stakeCredential st e in print r >> pure r
+    -- void $ foldEvent h mempty $ \st e -> let r = filterRewards stakeCredential st e in print r >> pure r
+    foldEvent h () $ \() -> \case AnchoredEvent _ _ (LedgerNewEpochEvent (LedgerStakeDistEvent e)) -> print e; _otherEvent -> pure ()
  where
   expectStakeCredential =
     maybe (error "invalid / missing stake address as 1st argument") return
