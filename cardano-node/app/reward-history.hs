@@ -1,10 +1,11 @@
-import Cardano.Node.LedgerEvent (foldEvent, filterRewards, parseStakeCredential)
+import Cardano.Node.LedgerEvent (parseStakeCredential, foldEvent, filterRewards)
 import System.Environment (getArgs)
-import System.IO (stdin, IOMode(ReadMode))
-import Text.Pretty.Simple (pPrint)
+import System.IO (IOMode(ReadMode))
 import Network.Socket
+import Control.Exception (bracket, bracketOnError)
+import Control.Monad (void)
 
--- Usage: rewards-history <<<stdin LEDGER-EVENTS] <STAKE-ADDRESS>
+-- Usage: reward-history <<<stdin LEDGER-EVENTS] <STAKE-ADDRESS>
 --
 -- Example:
 --
@@ -12,19 +13,29 @@ import Network.Socket
 main :: IO ()
 main = do
   stakeCredential <- getArgs >>= expectStakeCredential . head
-  addrInfo <- resolve
-  putStrLn $ "connecting to " <> show addrInfo
-  sock <- openSocket addrInfo
-  connect sock $ addrAddress addrInfo
-  h <- socketToHandle sock ReadMode
-  
-  history <- foldEvent (\st -> pure . filterRewards stakeCredential st) mempty h
-  pPrint history
+  print $ "Got stake credential: " ++ show stakeCredential
+
+  runTCPClient "localhost" "9999" $ \sock -> do
+    h <- socketToHandle sock ReadMode
+
+    putStrLn "Getting reward history..."
+    void $ foldEvent h mempty $ \st e -> let r = filterRewards stakeCredential st e in print r >> pure r
+    -- foldEvent h () $ \() e -> print e
  where
-  resolve = do
-        let hints = defaultHints { addrSocketType = Stream, addrFamily = AF_INET }
-        head <$> getAddrInfo (Just hints) (Just "localhost") (Just "9999")
   expectStakeCredential =
     maybe (error "invalid / missing stake address as 1st argument") return
     .
     parseStakeCredential
+
+runTCPClient :: HostName -> ServiceName -> (Socket -> IO a) -> IO a
+runTCPClient host port client = withSocketsDo $ do
+    addrInfo <- resolve
+    putStrLn $ "Connecting to " <> show addrInfo
+    bracket (open addrInfo) close client
+  where
+    resolve = do
+        let hints = defaultHints { addrSocketType = Stream, addrFamily = AF_INET }
+        head <$> getAddrInfo (Just hints) (Just host) (Just port)
+    open addr = bracketOnError (openSocket addr) close $ \sock -> do
+        connect sock $ addrAddress addr
+        return sock

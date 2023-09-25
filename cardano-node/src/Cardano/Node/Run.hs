@@ -82,7 +82,7 @@ import           Cardano.Node.Configuration.NodeAddress
 import           Cardano.Node.Configuration.POM (NodeConfiguration (..),
                    PartialNodeConfiguration (..), SomeNetworkP2PMode (..),
                    defaultPartialNodeConfiguration, makeNodeConfiguration, parseNodeConfigurationFP)
-import           Cardano.Node.LedgerEvent
+import           Cardano.Node.LedgerEvent (withLedgerEventsServerStream)
 import           Cardano.Node.Startup
 import           Cardano.Node.Tracing.API
 import           Cardano.Node.Tracing.StateRep (NodeState (NodeKernelOnline))
@@ -179,12 +179,12 @@ runNode cmdPc = do
               let ProtocolInfo { pInfoConfig } = fst $ Api.protocolInfo @IO runP
               in getNetworkMagic $ Consensus.configBlock pInfoConfig
 
-    streamingLedgerEvents 9999 $ \ledgerHandler ->
+    withLedgerEventsServerStream 9999 $ \ledgerEventHandler ->
       case p of
         SomeConsensusProtocol blockType runP ->
           handleNodeWithTracers
             (case blockType of
-              Api.CardanoBlockType -> ledgerHandler
+              Api.CardanoBlockType -> ledgerEventHandler
               Api.ByronBlockType{} -> discardEvent
               Api.ShelleyBlockType{} -> discardEvent
             )
