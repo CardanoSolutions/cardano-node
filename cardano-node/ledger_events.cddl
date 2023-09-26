@@ -1,0 +1,16 @@
+rule = ledger_event
+
+ledger_event =
+  [ (0, new_epoch)
+  // (1, body_event)
+  // (2, tick)
+  ]
+
+new_epoch =
+  #
+
+body_event =
+  #
+
+tick_event =
+  #
