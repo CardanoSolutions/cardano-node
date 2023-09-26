@@ -34,6 +34,12 @@ packages:
     trace-resources
     trace-forward
 
+    -- Added as local git sub-modules since they're also needed for this patched node version.
+    ouroboros-consensus/ouroboros-consensus
+    ouroboros-consensus/ouroboros-consensus-cardano
+    ouroboros-consensus/ouroboros-consensus-protocol
+    ouroboros-consensus/ouroboros-consensus-diffusion
+
 package cardano-api
   ghc-options: -Werror
 

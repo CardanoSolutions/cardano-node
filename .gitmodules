@@ -1,0 +1,3 @@
+[submodule "ouroboros-consensus"]
+	path = ouroboros-consensus
+	url = https://github.com/CardanoSolutions/ouroboros-consensus.git
