@@ -79,6 +79,7 @@ testPartialYamlConfig =
     , pncTargetNumberOfActivePeers = mempty
     , pncEnableP2P = Last (Just DisabledP2PMode)
     , pncPeerSharing = Last (Just NoPeerSharing)
+    , pncLedgerEventHandlerPort = Last Nothing
     }
 
 -- | Example partial configuration theoretically created
@@ -113,6 +114,7 @@ testPartialCliConfig =
     , pncTargetNumberOfActivePeers = mempty
     , pncEnableP2P = Last (Just DisabledP2PMode)
     , pncPeerSharing = Last (Just NoPeerSharing)
+    , pncLedgerEventHandlerPort = Last Nothing
     }
 
 -- | Expected final NodeConfiguration
@@ -155,6 +157,7 @@ eExpectedConfig = do
     , ncTargetNumberOfActivePeers = 20
     , ncEnableP2P = SomeNetworkP2PMode Consensus.DisabledP2PMode
     , ncPeerSharing = NoPeerSharing
+    , ncLedgerEventHandlerPort = Nothing
     }
 
 -- -----------------------------------------------------------------------------
