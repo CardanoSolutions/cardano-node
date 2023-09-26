@@ -24,7 +24,7 @@ genEvent =
   AnchoredEvent
    <$> (toShort <$> Gen.bytes (Range.constant 32 32))
    <*> (fromIntegral <$> Gen.word64 Range.constantBounded)
-   <*> (LedgerStartAtEpoch . fromIntegral <$> Gen.word16 Range.constantBounded)
+   <*> (LedgerNewEpochEvent . LedgerStartAtEpoch . fromIntegral <$> Gen.word16 Range.constantBounded)
 
 tests :: IO Bool
 tests =
