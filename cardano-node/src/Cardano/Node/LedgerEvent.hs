@@ -81,7 +81,8 @@ import           Ouroboros.Consensus.Cardano.Block (AllegraEra, AlonzoEra,
 import           Ouroboros.Consensus.HardFork.Combinator.AcrossEras
                      (OneEraLedgerEvent(..), getOneEraHash, getOneEraLedgerEvent)
 import           Ouroboros.Consensus.Ledger.Abstract (AuxLedgerEvent,
-                     LedgerState, LedgerEventHandler(..))
+                     LedgerEventHandler(..))
+import qualified Ouroboros.Consensus.Ledger.Abstract as Abstract
 import           Ouroboros.Consensus.Ledger.Extended (ExtLedgerState)
 import           Ouroboros.Consensus.Shelley.Ledger (ShelleyBlock,
                      ShelleyLedgerEvent (..))
@@ -89,6 +90,9 @@ import           Ouroboros.Consensus.TypeFamilyWrappers
 import           System.IO(hIsEOF)
 import Cardano.Ledger.Conway.Rules (ConwayNewEpochEvent, ConwayEpochEvent)
 import qualified Cardano.Ledger.Conway.Rules as Conway
+
+type LedgerState crypto =
+  ExtLedgerState (HardForkBlock (CardanoEras crypto))
 
 data LedgerEvent crypto
   = LedgerNewEpochEvent !(LedgerNewEpochEvent crypto)
@@ -101,6 +105,9 @@ data LedgerEvent crypto
   | LedgerTick
   deriving (Eq, Show)
 
+-- TODO(KtorZ): Discuss that design choice; I believe we should favor a more
+-- 'flat' structure for events instead of preserving whatever the ledger imposes
+-- on us.
 data LedgerNewEpochEvent crypto
   = LedgerMirDist
       !(Map (StakeCredential crypto) Coin)
@@ -118,7 +125,8 @@ data LedgerNewEpochEvent crypto
         -- ^ Stake pools refunds after retirement
       !(Map (Credential 'Staking crypto) (Map (KeyHash 'StakePool crypto) Coin))
         -- ^ Unclaimed deposit after retirement, for stake credentials that no longer exist.
-  | LedgerStakeDistEvent !(Map (Credential 'Staking crypto) (Coin, KeyHash 'StakePool crypto))
+  | LedgerStakeDistEvent
+      !(Map (Credential 'Staking crypto) (Coin, KeyHash 'StakePool crypto))
   | LedgerIncrementalRewards
       !EpochNo
       !(Map (StakeCredential crypto) (Set (Reward crypto)))
@@ -260,7 +268,7 @@ ledgerNewEpochEventName = \case
 
 fromAuxLedgerEvent
   :: forall xs crypto. (All ConvertLedgerEvent xs, crypto ~ StandardCrypto)
-  => AuxLedgerEvent (LedgerState (HardForkBlock xs))
+  => AuxLedgerEvent (Abstract.LedgerState (HardForkBlock xs))
   -> Maybe (LedgerEvent crypto)
 fromAuxLedgerEvent =
   toLedgerEvent . WrapLedgerEvent @(HardForkBlock xs)
@@ -470,12 +478,11 @@ filterRewards credential st = \case
 
 withLedgerEventsServerStream
   :: PortNumber
-  -> (LedgerEventHandler IO (ExtLedgerState (HardForkBlock (CardanoEras StandardCrypto))) -> IO ())
+  -> (LedgerEventHandler IO (LedgerState StandardCrypto) -> IO ())
   -> IO ()
 withLedgerEventsServerStream port handler = do
   withSocketsDo $ do
     bracket open closeSockets go
-
  where
   go s = do
     h <- socketToHandle s WriteMode

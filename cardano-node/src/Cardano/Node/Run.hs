@@ -179,22 +179,16 @@ runNode cmdPc = do
               let ProtocolInfo { pInfoConfig } = fst $ Api.protocolInfo @IO runP
               in getNetworkMagic $ Consensus.configBlock pInfoConfig
 
-    case p of
-      SomeConsensusProtocol blockType runP ->
-        case ncLedgerEventHandlerPort nc of
-          Nothing ->
-            handleNodeWithTracers
-              discardEvent
-              cmdPc nc p networkMagic runP
-          Just port ->
-            withLedgerEventsServerStream (fromIntegral port) $ \ledgerEventHandler ->
-                handleNodeWithTracers
-                  (case blockType of
-                    Api.CardanoBlockType -> ledgerEventHandler
-                    Api.ByronBlockType{} -> discardEvent
-                    Api.ShelleyBlockType{} -> discardEvent
-                  )
-                  cmdPc nc p networkMagic blockType runP
+    case (p, ncLedgerEventHandlerPort nc) of
+      (SomeConsensusProtocol blockType@Api.CardanoBlockType runP, Just port) ->
+        withLedgerEventsServerStream (fromIntegral port) $ \ledgerEventHandler ->
+          handleNodeWithTracers
+            ledgerEventHandler
+            cmdPc nc p networkMagic blockType runP
+      (SomeConsensusProtocol blockType runP, _) ->
+        handleNodeWithTracers
+          discardEvent
+          cmdPc nc p networkMagic blockType runP
 
 -- | Workaround to ensure that the main thread throws an async exception on
 -- receiving a SIGTERM signal.
