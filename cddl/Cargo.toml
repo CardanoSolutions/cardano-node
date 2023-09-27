@@ -8,5 +8,4 @@ name = "cddl"
 crate-type = ["staticlib"]
 
 [dependencies]
-cddl = "0.9.3"
-
+cddl-cat = "0.6.1"
