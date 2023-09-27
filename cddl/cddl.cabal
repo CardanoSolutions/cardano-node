@@ -52,7 +52,11 @@ test-suite unit
                         Paths_cddl
   build-depends:        , base
                         , base16-bytestring
+                        , bytestring
                         , cddl
+                        , hedgehog
                         , hspec
+                        , hspec-hedgehog
                         , text
+                        , cardano-node
   build-tool-depends:   hspec-discover:hspec-discover
