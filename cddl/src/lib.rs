@@ -1,4 +1,4 @@
-use cddl::validate_cbor_from_slice;
+use cddl_cat::validate_cbor_bytes;
 use std::{slice, str};
 
 #[no_mangle]
@@ -10,7 +10,7 @@ pub extern "C" fn validate_cbor(
 ) -> () {
     let cddl = unsafe { slice::from_raw_parts(cddl_ptr, cddl_len) };
     let cbor = unsafe { slice::from_raw_parts(cbor_ptr, cbor_len) };
-    match validate_cbor_from_slice(str::from_utf8(cddl).unwrap(), cbor, None) {
+    match validate_cbor_bytes("rule", str::from_utf8(cddl).unwrap(), cbor) {
         Ok(_) => (),
         Err(e) => panic!("{e:#?}"),
     }
