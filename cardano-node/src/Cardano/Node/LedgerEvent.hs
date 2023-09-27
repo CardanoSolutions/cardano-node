@@ -90,6 +90,7 @@ import           Ouroboros.Consensus.TypeFamilyWrappers
 import           System.IO(hIsEOF)
 import Cardano.Ledger.Conway.Rules (ConwayNewEpochEvent, ConwayEpochEvent)
 import qualified Cardano.Ledger.Conway.Rules as Conway
+import qualified Cardano.Ledger.Shelley.API as ShelleyAPI
 
 type LedgerState crypto =
   ExtLedgerState (HardForkBlock (CardanoEras crypto))
@@ -140,6 +141,23 @@ data LedgerNewEpochEvent crypto
   | LedgerTotalRewards
       !EpochNo
       !(Map (StakeCredential crypto) (Set (Reward crypto)))
+  | LedgerTotalAdaPots
+      !Coin
+      -- ^ Treasury Ada pot
+      !Coin
+      -- ^ Reserves Ada pot
+      !Coin
+      -- ^ Rewards Ada pot
+      !Coin
+      -- ^ Utxo Ada pot
+      !Coin
+      -- ^ Key deposit Ada pot
+      !Coin
+      -- ^ Pool deposit Ada pot
+      !Coin
+      -- ^ Deposits Ada pot
+      !Coin
+      -- ^ Fees Ada pot
   | LedgerStartAtEpoch !EpochNo
   deriving (Eq, Show)
 
@@ -186,6 +204,16 @@ instance Crypto crypto => EncCBOR (LedgerNewEpochEvent crypto) where
     LedgerStartAtEpoch epoch ->
       Sum LedgerStartAtEpoch 7
         !> To epoch
+    LedgerTotalAdaPots treasuryAdaPot reservesAdaPot rewardsAdaPot utxoAdaPot keyDepositAdaPot poolDepositAdaPot depositsAdaPot feesAdaPot ->
+      Sum LedgerTotalAdaPots 8
+        !> To treasuryAdaPot
+        !> To reservesAdaPot
+        !> To rewardsAdaPot
+        !> To utxoAdaPot
+        !> To keyDepositAdaPot
+        !> To poolDepositAdaPot
+        !> To depositsAdaPot
+        !> To feesAdaPot
 
 instance Crypto crypto => DecCBOR (LedgerEvent crypto) where
   decCBOR = decode (Summands "LedgerEvent" decRaw)
@@ -224,6 +252,15 @@ instance Crypto crypto => DecCBOR (LedgerNewEpochEvent crypto) where
         <! From
       decRaw 7 = SumD LedgerStartAtEpoch
         <! From
+      decRaw 8 = SumD LedgerTotalAdaPots
+        <! From
+        <! From
+        <! From
+        <! From
+        <! From
+        <! From
+        <! From
+        <! From
       decRaw n = Invalid n
 
 -- | Parse a 'StakeCredential' from a stake address in base16.
@@ -246,8 +283,9 @@ toOrdering = \case
   LedgerNewEpochEvent LedgerRestrainedRewards {}  -> 5
   LedgerNewEpochEvent LedgerTotalRewards {}       -> 6
   LedgerNewEpochEvent LedgerStartAtEpoch {}       -> 7
-  LedgerBody                                      -> 8
-  LedgerTick                                      -> 9
+  LedgerNewEpochEvent LedgerTotalAdaPots {}       -> 8
+  LedgerBody                                      -> 9
+  LedgerTick                                      -> 10
 
 ledgerEventName :: LedgerEvent crypto -> Text
 ledgerEventName = \case
@@ -265,6 +303,7 @@ ledgerNewEpochEventName = \case
   LedgerRestrainedRewards {}  -> "LedgerRestrainedRewards"
   LedgerTotalRewards {}       -> "LedgerTotalRewards"
   LedgerStartAtEpoch {}       -> "LedgerStartAtEpoch"
+  LedgerTotalAdaPots {}       -> "LedgerTotalAdaPots"
 
 fromAuxLedgerEvent
   :: forall xs crypto. (All ConvertLedgerEvent xs, crypto ~ StandardCrypto)
@@ -294,6 +333,7 @@ type ShelleyEventsConstraints era =
   , Event (Ledger.EraRule "POOLREAP" era) ~ ShelleyPoolreapEvent era
   , Event (Ledger.EraRule "RUPD" era) ~ RupdEvent (EraCrypto era)
   , Event (Ledger.EraRule "SNAP" era) ~ Rules.SnapEvent era
+  , Event (Ledger.EraRule "UPEC" era) ~ Void
   )
 
 toLedgerEventShelley
@@ -322,10 +362,21 @@ toLedgerEventShelley evt =
        Just $ LedgerNewEpochEvent $ LedgerPoolReaping epoch refunded unclaimed
     ShelleyLedgerEventTICK (TickNewEpochEvent (Shelley.EpochEvent (Shelley.SnapEvent (Shelley.StakeDistEvent stakeDist)))) ->
       Just $ LedgerNewEpochEvent $ LedgerStakeDistEvent stakeDist
-    ShelleyLedgerEventTICK (TickNewEpochEvent (Shelley.EpochEvent (Shelley.UpecEvent _))) -> -- TODO: create an event for this
-      Just LedgerTick
-    ShelleyLedgerEventTICK (TickNewEpochEvent (Shelley.TotalAdaPotsEvent _)) -> -- TODO: create an event for this
-      Just LedgerTick
+    ShelleyLedgerEventTICK (TickNewEpochEvent (Shelley.EpochEvent (Shelley.UpecEvent _))) ->
+      -- There isn't any data associated with UpecEvent: Event (EraRule "UPEC" era) ~ Void
+      Nothing
+    ShelleyLedgerEventTICK (TickNewEpochEvent (Shelley.TotalAdaPotsEvent adaPots)) -> -- TODO: create an event for this
+      Just
+        $ LedgerNewEpochEvent
+        $ LedgerTotalAdaPots
+            (ShelleyAPI.treasuryAdaPot adaPots)
+            (ShelleyAPI.reservesAdaPot adaPots)
+            (ShelleyAPI.rewardsAdaPot adaPots)
+            (ShelleyAPI.utxoAdaPot adaPots)
+            (ShelleyAPI.keyDepositAdaPot adaPots)
+            (ShelleyAPI.poolDepositAdaPot adaPots)
+            (ShelleyAPI.depositsAdaPot adaPots)
+            (ShelleyAPI.feesAdaPot adaPots)
     ShelleyLedgerEventBBODY _ ->
       Just LedgerBody
 
@@ -356,12 +407,22 @@ toConwayEventShelley evt =
       Nothing -- Or else getting "Pattern not exhaustif" warning, but can't seem to find the missing constructor.
     ShelleyLedgerEventTICK (TickNewEpochEvent (Conway.EpochEvent (Conway.PoolReapEvent (RetiredPools refunded unclaimed epoch)))) ->
        Just $ LedgerNewEpochEvent $ LedgerPoolReaping epoch refunded unclaimed
-    ShelleyLedgerEventTICK (TickNewEpochEvent (Conway.EpochEvent (Conway.SnapEvent (Shelley.StakeDistEvent _)))) -> -- TODO: create an event for this
-      Just LedgerTick
-    ShelleyLedgerEventTICK (TickNewEpochEvent (Conway.EpochEvent _)) -> -- TODO: create an event for this
+    ShelleyLedgerEventTICK (TickNewEpochEvent (Conway.EpochEvent (Conway.SnapEvent (Shelley.StakeDistEvent stakeDist)))) ->
+      Just $ LedgerNewEpochEvent $ LedgerStakeDistEvent stakeDist
+    ShelleyLedgerEventTICK (TickNewEpochEvent (Conway.EpochEvent _)) ->
       Nothing -- Or else getting "Pattern not exhaustif" warning, but can't seem to find the missing constructor.
-    ShelleyLedgerEventTICK (TickNewEpochEvent (Conway.TotalAdaPotsEvent _)) -> -- TODO: create an event for this
-      Just LedgerTick
+    ShelleyLedgerEventTICK (TickNewEpochEvent (Conway.TotalAdaPotsEvent adaPots)) ->
+      Just
+        $ LedgerNewEpochEvent
+        $ LedgerTotalAdaPots
+            (ShelleyAPI.treasuryAdaPot adaPots)
+            (ShelleyAPI.reservesAdaPot adaPots)
+            (ShelleyAPI.rewardsAdaPot adaPots)
+            (ShelleyAPI.utxoAdaPot adaPots)
+            (ShelleyAPI.keyDepositAdaPot adaPots)
+            (ShelleyAPI.poolDepositAdaPot adaPots)
+            (ShelleyAPI.depositsAdaPot adaPots)
+            (ShelleyAPI.feesAdaPot adaPots)
     ShelleyLedgerEventTICK (TickRupdEvent (RupdEvent epoch rewards)) ->
       Just $ LedgerNewEpochEvent $ LedgerIncrementalRewards epoch rewards
     ShelleyLedgerEventBBODY _ ->
