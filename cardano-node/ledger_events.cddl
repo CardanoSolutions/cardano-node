@@ -1,16 +1,102 @@
-rule = ledger_event
-
-ledger_event =
-  [ (0, new_epoch)
-  // (1, body_event)
-  // (2, tick)
+rule =
+  [ version                    ; The codec version used to encode the following event.
+  , bytes .cbor anchored-event ; An CBOR-encoded anchored ledger event.
   ]
 
-new_epoch =
-  #
+anchored-event =
+  { 0: block-header-hash       ; The block header hash from where this event was emitted.
+  , 1: slot                    ; The slot number corresponding to the aforementioned header hash.
+  , 2: ledger-event            ; The actual ledger event.
+  }
 
-body_event =
-  #
+ledger-event =
+  [  0, ledger-event.epoch
+  // 1, ledger-event.body
+  // 2, ledger-event.tick
+  ]
 
-tick_event =
-  #
+; ============= ;
+; Ledger events ;
+; ============= ;
+
+ledger-event.epoch =
+  [  0, epoch.mir-distribution
+  // 1, epoch.stake-pool-reaping
+  // 2, epoch.stake-distribution
+  // 3, epoch.incremental-rewards
+  // 4, epoch.delta-rewards
+  ]
+
+epoch.mir-distribution =
+  { 0: stake-distribution ; Rewards paid from the Reserve into stake credentials
+  , 1: stake-distribution ; Rewards paid from the Treasury into stake credentials
+  , 2: delta-coin         ; Transfer from the Reserve into the Treasury
+  , 3: delta-coin         ; Transfer from the Treasury into the Reserve
+  }
+
+epoch.stake-pool-reaping = #
+
+epoch.stake-distribution = #
+
+epoch.incremental-rewards = #
+
+epoch.delta-rewards = #
+
+ledger-event.body = #
+
+ledger-event.tick = #
+
+; ============== ;
+; Common schemas ;
+; ============== ;
+
+coin =
+  uint
+
+block-header-hash =
+  $hash32
+
+delta-coin =
+  int
+
+epoch =
+  uint
+
+pool-id =
+  $hash28
+
+reward =
+  { 0: reward-type
+  , 1: pool-id
+  , 2: coin
+  }
+
+reward-type =
+  [  0 ; member rewards
+  // 1 ; leader rewards
+  ]
+
+slot =
+  uint
+
+stake-credential =
+  [  0, $hash28
+  // 1, $hash28
+  ]
+
+stake-distribution =
+  { * stake-credential => coin
+  }
+
+version =
+  uint
+
+; ========================= ;
+; Parameterized  primitives ;
+; ========================= ;
+
+$hash28 /=
+  bytes .size 28
+
+$hash32 /=
+  bytes .size 32
