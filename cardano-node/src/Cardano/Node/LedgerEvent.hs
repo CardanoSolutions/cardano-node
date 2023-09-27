@@ -16,23 +16,42 @@
 
 -- | Local representation for display purpose of cardano-ledger events.
 --
--- Shamelessly stolen from db-sync.
+-- Shamelessly stolen and adapted from db-sync.
 module Cardano.Node.LedgerEvent (
-    ConvertLedgerEvent (..)
-  , ShelleyEventsConstraints
-  , ConwayEventsConstraints
+    -- * Ledger Events
+    AnchoredEvent (..)
   , LedgerEvent (..)
   , LedgerNewEpochEvent (..)
-  , AnchoredEvent (..)
-  , fromAuxLedgerEvent
-  , ledgerEventName
-  , eventCodecVersion
-  , serializeAnchoredEvent
   , deserializeAnchoredEvent
+  , serializeAnchoredEvent
+  , ledgerEventName
+
+    -- ** Using Ledger events
+  , withLedgerEventsServerStream
   , foldEvent
+
+    -- ** Example
   , filterRewards
   , parseStakeCredential
-  , withLedgerEventsServerStream
+
+    -- * Type-level plumbing
+  , ConvertLedgerEvent (..)
+  , ConwayEventsConstraints
+  , ShelleyEventsConstraints
+  , eventCodecVersion
+
+    -- * Re-Exports
+  , Coin (..)
+  , Credential (..)
+  , DeltaCoin (..)
+  , EpochNo (..)
+  , KeyHash (..)
+  , KeyRole (..)
+  , Reward (..)
+  , ScriptHash (..)
+  , SlotNo (..)
+  , StandardCrypto
+  , serialize'
   ) where
 
 import           Cardano.Prelude hiding (All, Sum)
@@ -43,7 +62,7 @@ import           Cardano.Ledger.Binary (DecCBOR(..), EncCBOR(..), Version,
 import           Cardano.Ledger.Binary.Coders (Decode(..), Encode (..), encode, (!>),
                    (<!), decode)
 import           Cardano.Ledger.Coin (Coin (..), DeltaCoin (..))
-import           Cardano.Ledger.Credential(Credential, StakeCredential)
+import           Cardano.Ledger.Credential (Credential (..))
 import           Cardano.Ledger.Rewards (Reward(..))
 import qualified Cardano.Ledger.Shelley.Rules as Rules
 import qualified Cardano.Ledger.Core as Ledger
@@ -51,14 +70,14 @@ import qualified Cardano.Ledger.Address as Ledger
 import           Cardano.Ledger.Core (eraProtVerLow)
 import           Cardano.Ledger.Crypto (Crypto, StandardCrypto)
 import           Cardano.Ledger.Keys (KeyRole (..))
-import           Cardano.Ledger.Shelley.API (InstantaneousRewards (..), KeyHash)
+import           Cardano.Ledger.Shelley.API (InstantaneousRewards (..), KeyHash (..), ScriptHash (..))
 import           Cardano.Ledger.Shelley.Core (EraCrypto)
 import qualified Cardano.Ledger.Shelley.Rules as Shelley
 import           Cardano.Ledger.Shelley.Rules (RupdEvent (..),
                      ShelleyEpochEvent (..), ShelleyMirEvent (..),
                      ShelleyNewEpochEvent, ShelleyPoolreapEvent (..),
                      ShelleyTickEvent (..))
-import           Cardano.Slotting.Slot (SlotNo, EpochNo (..))
+import           Cardano.Slotting.Slot (SlotNo (..), EpochNo (..))
 import qualified Codec.CBOR.Decoding as CBOR
 import qualified Codec.CBOR.Encoding as CBOR
 import qualified Codec.CBOR.Read as CBOR
@@ -74,7 +93,9 @@ import           Data.SOP (All, K (..))
 import           Data.SOP.Strict (NS(..), hcmap, hcollapse)
 import qualified Data.Set as Set
 import           Data.String (String)
-import           Network.Socket(PortNumber, defaultProtocol, listen, accept, bind, close, socket, socketToHandle, withSocketsDo, SockAddr(..), SocketType(Stream), Family(AF_INET))
+import           Network.Socket(PortNumber, defaultProtocol, listen, accept,
+                  bind, close, socket, socketToHandle, withSocketsDo,
+                  SockAddr(..), SocketType(Stream), Family(AF_INET))
 import           Ouroboros.Consensus.Byron.Ledger.Block (ByronBlock)
 import           Ouroboros.Consensus.Cardano.Block (AllegraEra, AlonzoEra,
                      BabbageEra, CardanoEras, ConwayEra, HardForkBlock,
@@ -112,9 +133,9 @@ data LedgerEvent crypto
 -- on us.
 data LedgerNewEpochEvent crypto
   = LedgerMirDist
-      !(Map (StakeCredential crypto) Coin)
+      !(Map (Credential 'Staking crypto) Coin)
         -- ^ Rewards paid from the __Reserve__ into stake credentials
-      !(Map (StakeCredential crypto) Coin)
+      !(Map (Credential 'Staking crypto) Coin)
         -- ^ Rewards paid from the __Treasury__ to stake credentials
       !DeltaCoin
         -- ^ Transfer from the __Reserve__ into the __Treasury__
@@ -131,17 +152,17 @@ data LedgerNewEpochEvent crypto
       !(Map (Credential 'Staking crypto) (Coin, KeyHash 'StakePool crypto))
   | LedgerIncrementalRewards
       !EpochNo
-      !(Map (StakeCredential crypto) (Set (Reward crypto)))
+      !(Map (Credential 'Staking crypto) (Set (Reward crypto)))
   | LedgerDeltaRewards
       !EpochNo
-      !(Map (StakeCredential crypto) (Set (Reward crypto)))
+      !(Map (Credential 'Staking crypto) (Set (Reward crypto)))
   | LedgerRestrainedRewards
       !EpochNo
-      !(Map (StakeCredential crypto) (Set (Reward crypto)))
-      !(Set (StakeCredential crypto))
+      !(Map (Credential 'Staking crypto) (Set (Reward crypto)))
+      !(Set (Credential 'Staking crypto))
   | LedgerTotalRewards
       !EpochNo
-      !(Map (StakeCredential crypto) (Set (Reward crypto)))
+      !(Map (Credential 'Staking crypto) (Set (Reward crypto)))
   | LedgerTotalAdaPots
       !Coin
       -- ^ Treasury Ada pot
@@ -264,8 +285,8 @@ instance Crypto crypto => DecCBOR (LedgerNewEpochEvent crypto) where
         <! From
       decRaw n = Invalid n
 
--- | Parse a 'StakeCredential' from a stake address in base16.
-parseStakeCredential :: String -> Maybe (StakeCredential StandardCrypto)
+-- | Parse a 'Credential 'Staking' from a stake address in base16.
+parseStakeCredential :: String -> Maybe (Credential 'Staking StandardCrypto)
 parseStakeCredential str =
    case Hex.decode (B8.pack str) of
      Right bytes -> Ledger.getRwdCred <$> Ledger.decodeRewardAcnt bytes
@@ -490,7 +511,7 @@ serializeAnchoredEvent version event =
     <>
     toCBOR version
     <>
-    CBOR.encodeBytes (serialize' version (encCBOR event))
+    CBOR.encodeBytes (serialize' version event)
 
 deserializeAnchoredEvent
   :: LBS.ByteString
@@ -524,7 +545,7 @@ foldEvent h st0 fn =
         go st' events
 
 filterRewards
-  :: StakeCredential StandardCrypto
+  :: Credential 'Staking StandardCrypto
   -> Map EpochNo Coin
   -> AnchoredEvent
   -> Map EpochNo Coin
