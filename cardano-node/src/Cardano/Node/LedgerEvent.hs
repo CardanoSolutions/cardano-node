@@ -27,9 +27,8 @@ module Cardano.Node.LedgerEvent (
   , fromAuxLedgerEvent
   , ledgerEventName
   , eventCodecVersion
-  , deserializeEvent
-  , serializeEvent
-
+  , serializeAnchoredEvent
+  , deserializeAnchoredEvent
   , foldEvent
   , filterRewards
   , parseStakeCredential
@@ -38,8 +37,9 @@ module Cardano.Node.LedgerEvent (
 
 import           Cardano.Prelude hiding (All, Sum)
 
-import           Cardano.Ledger.Binary (DecCBOR(..), EncCBOR(..), Version, fromCBOR,
-                   serialize', toCBOR, toPlainDecoder)
+import           Control.Monad.Fail (MonadFail(..))
+import           Cardano.Ledger.Binary (DecCBOR(..), EncCBOR(..), Version,
+                   decodeFull', fromCBOR, serialize', toCBOR)
 import           Cardano.Ledger.Binary.Coders (Decode(..), Encode (..), encode, (!>),
                    (<!), decode)
 import           Cardano.Ledger.Coin (Coin (..), DeltaCoin (..))
@@ -60,8 +60,9 @@ import           Cardano.Ledger.Shelley.Rules (RupdEvent (..),
                      ShelleyTickEvent (..))
 import           Cardano.Slotting.Slot (SlotNo, EpochNo (..))
 import qualified Codec.CBOR.Decoding as CBOR
+import qualified Codec.CBOR.Encoding as CBOR
+import qualified Codec.CBOR.Read as CBOR
 import qualified Codec.CBOR.Write as CBOR
-import           Codec.CBOR.Read(deserialiseFromBytes)
 import           Control.State.Transition (Event)
 import           Data.ByteString.Short(ShortByteString)
 import qualified Data.ByteString.Char8 as B8
@@ -467,7 +468,10 @@ data AnchoredEvent =
 
 instance EncCBOR AnchoredEvent where
   encCBOR AnchoredEvent{headerHash, slotNo, ledgerEvent} =
-    encode $  Rec AnchoredEvent !> To headerHash !> To slotNo !> To ledgerEvent
+    encode $ Rec AnchoredEvent
+      !> To headerHash
+      !> To slotNo
+      !> To ledgerEvent
 
 instance DecCBOR AnchoredEvent where
   decCBOR =
@@ -476,18 +480,29 @@ instance DecCBOR AnchoredEvent where
       <! From
       <! From
 
-serializeEvent :: Version -> AnchoredEvent -> ByteString
-serializeEvent codecVersion event =
-  CBOR.toStrictByteString (toCBOR codecVersion) <> serialize' codecVersion event
+serializeAnchoredEvent :: Version -> AnchoredEvent -> ByteString
+serializeAnchoredEvent version event =
+  CBOR.toStrictByteString encoding
+ where
+  encoding =
+    CBOR.encodeListLen 2
+    <>
+    toCBOR version
+    <>
+    CBOR.encodeBytes (serialize' version (encCBOR event))
 
-deserializeEvent :: LBS.ByteString -> Maybe AnchoredEvent
-deserializeEvent bytes = do
-  case deserialiseFromBytes @Version fromCBOR bytes of
-    Right (rest, version) ->
-      case deserialiseFromBytes (toPlainDecoder version decCBOR) rest of
-        Right (_, event) -> Just event
-        Left{} -> Nothing
-    Left{} -> Nothing
+deserializeAnchoredEvent
+  :: LBS.ByteString
+  -> Either CBOR.DeserialiseFailure (LBS.ByteString, AnchoredEvent)
+deserializeAnchoredEvent =
+  CBOR.deserialiseFromBytes decoder
+ where
+   decoder = do
+    -- TODO: ensure map len is 2
+    _ <- CBOR.decodeListLen
+    version <- fromCBOR
+    bytes <- CBOR.decodeBytes
+    either (fail . show) pure (decodeFull' version bytes)
 
 -- IO action to read ledger events in binary form
 foldEvent
@@ -503,24 +518,9 @@ foldEvent h st0 fn =
       if eof then
         pure st
       else do
-        (rest, version :: Version) <- unsafeDeserialiseFromBytes
-          fromCBOR
-          bytes
-
-        (events, event :: AnchoredEvent) <- unsafeDeserialiseFromBytes
-          (toPlainDecoder version decCBOR)
-          rest
-
+        (events, event) <- either (panic . show) pure $ deserializeAnchoredEvent bytes
         st' <- fn st event
-
         go st' events
-
-    unsafeDeserialiseFromBytes
-      :: forall a . (forall s. CBOR.Decoder s a)
-      -> LBS.ByteString
-      -> IO (LBS.ByteString, a)
-    unsafeDeserialiseFromBytes decoder =
-      either (panic . show) pure . deserialiseFromBytes decoder
 
 filterRewards
   :: StakeCredential StandardCrypto
@@ -562,8 +562,5 @@ withLedgerEventsServerStream port handler = do
     case fromAuxLedgerEvent event of
       Nothing -> pure ()
       Just e -> do
-        let serializedEvent =
-              serializeEvent
-                (eventCodecVersion event)
-                (AnchoredEvent (getOneEraHash headerHash) slotNo e)
-        BS.hPut h serializedEvent
+        let anchoredEvent = AnchoredEvent (getOneEraHash headerHash) slotNo e
+        BS.hPut h $ serializeAnchoredEvent (eventCodecVersion event) anchoredEvent
