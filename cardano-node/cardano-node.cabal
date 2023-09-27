@@ -253,7 +253,6 @@ test-suite cardano-node-test
                       , cardano-ledger-core
                       , cardano-node
                       , cardano-slotting >= 0.1
-                      , cddl
                       , directory
                       , filepath
                       , hedgehog
