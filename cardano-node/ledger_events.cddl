@@ -1,7 +1,12 @@
+; TODO '.cbor' control operator isn't supported by our validation lib at the moment.
+;
+; rule =
+;   [ version                    ; The codec version used to encode the following event.
+;   , bytes .cbor anchored-event ; An CBOR-encoded anchored ledger event.
+;   ]
+
 rule =
-  [ version                    ; The codec version used to encode the following event.
-  , bytes .cbor anchored-event ; An CBOR-encoded anchored ledger event.
-  ]
+  ledger-event
 
 anchored-event =
   { 0: block-header-hash       ; The block header hash from where this event was emitted.
@@ -9,15 +14,15 @@ anchored-event =
   , 2: ledger-event            ; The actual ledger event.
   }
 
+; ============= ;
+; Ledger events ;
+; ============= ;
+
 ledger-event =
   [  0, ledger-event.epoch
   // 1, ledger-event.body
   // 2, ledger-event.tick
   ]
-
-; ============= ;
-; Ledger events ;
-; ============= ;
 
 ledger-event.epoch =
   [  0, epoch.mir-distribution
@@ -25,26 +30,47 @@ ledger-event.epoch =
   // 2, epoch.stake-distribution
   // 3, epoch.incremental-rewards
   // 4, epoch.delta-rewards
+  // 5, epoch.restrained-rewards
+  // 6, epoch.total-rewards
+  // 7, epoch.starts-at
   ]
 
 epoch.mir-distribution =
-  { 0: stake-distribution ; Rewards paid from the Reserve into stake credentials
-  , 1: stake-distribution ; Rewards paid from the Treasury into stake credentials
-  , 2: delta-coin         ; Transfer from the Reserve into the Treasury
-  , 3: delta-coin         ; Transfer from the Treasury into the Reserve
-  }
+  ( stake-distribution ; Rewards paid from the Reserve into stake credentials
+  , stake-distribution ; Rewards paid from the Treasury into stake credentials
+  , delta-coin         ; Transfer from the Reserve into the Treasury
+  , delta-coin         ; Transfer from the Treasury into the Reserve
+  )
 
-epoch.stake-pool-reaping = #
+epoch.stake-pool-reaping =
+  ( epoch
+  , refund-distribution
+  , refund-distribution
+  )
 
-epoch.stake-distribution = #
+epoch.stake-distribution =
+  any
 
-epoch.incremental-rewards = #
+epoch.incremental-rewards =
+  any
 
-epoch.delta-rewards = #
+epoch.delta-rewards =
+  any
 
-ledger-event.body = #
+epoch.restrained-rewards =
+  any
 
-ledger-event.tick = #
+epoch.total-rewards =
+  any
+
+epoch.starts-at =
+  epoch
+
+ledger-event.body =
+  any
+
+ledger-event.tick =
+  any
 
 ; ============== ;
 ; Common schemas ;
@@ -65,6 +91,9 @@ epoch =
 pool-id =
   $hash28
 
+refund-distribution =
+  { * stake-credential => { * $hash28 => coin } }
+
 reward =
   { 0: reward-type
   , 1: pool-id
@@ -80,8 +109,8 @@ slot =
   uint
 
 stake-credential =
-  [  0, $hash28
-  // 1, $hash28
+  [  0, $hash28   ; Key hash digest
+  // 1, $hash28   ; Script hash digest
   ]
 
 stake-distribution =
@@ -95,8 +124,8 @@ version =
 ; Parameterized  primitives ;
 ; ========================= ;
 
-$hash28 /=
+$hash28 =
   bytes .size 28
 
-$hash32 /=
+$hash32 =
   bytes .size 32
