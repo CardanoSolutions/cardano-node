@@ -40,6 +40,7 @@ library
   other-modules:        Paths_cddl
   autogen-modules:      Paths_cddl
   build-depends:        , base
+                        , base16-bytestring
                         , bytestring
                         , text
 
