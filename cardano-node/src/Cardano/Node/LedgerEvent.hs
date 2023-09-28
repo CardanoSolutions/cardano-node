@@ -191,25 +191,26 @@ data LedgerNewEpochEvent crypto
         -- ^ A set of unregistered credentials which won't receive rewards
   | LedgerTotalRewards
       !EpochNo
+        -- ^ The epoch number of the new epoch
       !(Map (Credential 'Staking crypto) (Set (Reward crypto)))
+        -- ^ Total rewards distributed at the epoch boundary
   | LedgerTotalAdaPots
       !Coin
-      -- ^ Treasury Ada pot
+        -- ^ Treasury Ada pot
       !Coin
-      -- ^ Reserves Ada pot
+        -- ^ Reserves Ada pot
       !Coin
-      -- ^ Rewards Ada pot
+        -- ^ Rewards Ada pot
       !Coin
-      -- ^ Utxo Ada pot
+        -- ^ Utxo Ada pot
       !Coin
-      -- ^ Key deposit Ada pot
+        -- ^ Key deposit Ada pot
       !Coin
-      -- ^ Pool deposit Ada pot
+        -- ^ Pool deposit Ada pot
       !Coin
-      -- ^ Deposits Ada pot
+        -- ^ Deposits Ada pot
       !Coin
-      -- ^ Fees Ada pot
-  | LedgerStartAtEpoch !EpochNo
+        -- ^ Fees Ada pot
   deriving (Eq, Show)
 
 instance Crypto crypto => EncCBOR (LedgerNewEpochEvent crypto) where
@@ -234,22 +235,19 @@ instance Crypto crypto => EncCBOR (LedgerNewEpochEvent crypto) where
         !> To (Set.toList <$> ignored)
         !> To (Set.toList unregistered)
     LedgerTotalRewards epoch rewards ->
-      Sum LedgerTotalRewards 4
+      Sum (\a0 -> LedgerTotalRewards a0 . fmap Set.fromList) 4
         !> To epoch
+        !> To (Set.toList <$> rewards)
+    LedgerTotalAdaPots treasury reserves rewards utxo keyDeposit poolDeposit deposits fees ->
+      Sum LedgerTotalAdaPots 5
+        !> To treasury
+        !> To reserves
         !> To rewards
-    LedgerStartAtEpoch epoch ->
-      Sum LedgerStartAtEpoch 5
-        !> To epoch
-    LedgerTotalAdaPots treasuryAdaPot reservesAdaPot rewardsAdaPot utxoAdaPot keyDepositAdaPot poolDepositAdaPot depositsAdaPot feesAdaPot ->
-      Sum LedgerTotalAdaPots 6
-        !> To treasuryAdaPot
-        !> To reservesAdaPot
-        !> To rewardsAdaPot
-        !> To utxoAdaPot
-        !> To keyDepositAdaPot
-        !> To poolDepositAdaPot
-        !> To depositsAdaPot
-        !> To feesAdaPot
+        !> To utxo
+        !> To keyDeposit
+        !> To poolDeposit
+        !> To deposits
+        !> To fees
 
 instance Crypto crypto => DecCBOR (LedgerNewEpochEvent crypto) where
   decCBOR = decode (Summands "LedgerNewEpochEvent" decRaw)
@@ -274,13 +272,10 @@ instance Crypto crypto => DecCBOR (LedgerNewEpochEvent crypto) where
           <! From
           <! From
       decRaw 4 =
-        SumD LedgerTotalRewards
+        SumD (\a0 -> LedgerTotalRewards a0 . fmap Set.fromList)
           <! From
           <! From
       decRaw 5 =
-        SumD LedgerStartAtEpoch
-          <! From
-      decRaw 6 =
         SumD LedgerTotalAdaPots
           <! From
           <! From
@@ -292,7 +287,6 @@ instance Crypto crypto => DecCBOR (LedgerNewEpochEvent crypto) where
           <! From
       decRaw n =
         Invalid n
-
 
 data LedgerRewardUpdateEvent crypto
   = LedgerIncrementalRewards
@@ -337,7 +331,6 @@ toOrdering = \case
   LedgerRewardUpdateEvent LedgerIncrementalRewards {} -> 3
   LedgerNewEpochEvent LedgerRestrainedRewards {}      -> 5
   LedgerNewEpochEvent LedgerTotalRewards {}           -> 6
-  LedgerNewEpochEvent LedgerStartAtEpoch {}           -> 7
   LedgerNewEpochEvent LedgerTotalAdaPots {}           -> 8
   LedgerBody                                          -> 9
   LedgerTick                                          -> 10
@@ -356,7 +349,6 @@ ledgerNewEpochEventName = \case
   LedgerStakeDistEvent {}     -> "LedgerStakeDistEvent"
   LedgerRestrainedRewards {}  -> "LedgerRestrainedRewards"
   LedgerTotalRewards {}       -> "LedgerTotalRewards"
-  LedgerStartAtEpoch {}       -> "LedgerStartAtEpoch"
   LedgerTotalAdaPots {}       -> "LedgerTotalAdaPots"
 
 ledgerRewardUpdateEventName :: LedgerRewardUpdateEvent crypto -> Text

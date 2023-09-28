@@ -31,7 +31,7 @@ ledger-event.epoch =
   // 2, epoch.stake-distribution
   // 3, epoch.restrained-rewards
   // 4, epoch.total-rewards
-  // 5, epoch.starts-at
+  // 5, epoch.ada-pots
   ]
 
 ledger-event.reward-update =
@@ -97,6 +97,7 @@ epoch.stake-distribution =
   ( { * stake-credential => [ coin, pool-id ] }
   )
 
+
 ; -- Epoch / Restrained rewards ------------------------------------------------
 ;
 ; Describes rewards which are calculated by the ledger, but are not delivered to
@@ -113,13 +114,40 @@ epoch.restrained-rewards =
   , [ * stake-credential ]                  ; unregistered credentials which can no longer receive rewards
   )
 
+
+; -- Epoch / Restrained rewards ------------------------------------------------
+;
+; Contains all the rewards which are delivered on the epoch boundary. In
+; particular, we have the following property:
+;
+;    Σincremental-rewards - restrained-rewards = total-rewards
+;
+;                                  → This event only occurs on epoch boundaries.
 epoch.total-rewards =
-  any
+  ( epoch                                   ; The epoch number of the new epoch
+  , { * stake-credential => [ 1* reward ] } ; Total rewards distributed at the epoch boundary
+  )
 
-epoch.starts-at =
-  epoch
 
-; -- Epoch / Incremental rewards  ------------------------------------------------
+; -- Epoch / Ada pots ----------------------------------------------------------
+;
+; The state of each pot of Ada/Lovelace in the ledger. The total sum of all pots
+; should always be equal to the network max supply (45B Ada on mainnet).
+;
+;                                  → This event only occurs on epoch boundaries.
+epoch.ada-pots =
+  ( coin ; Total amount in the Treasury
+  , coin ; Total amount in the Reserve
+  , coin ; Total amount held in reward accounts
+  , coin ; Total amount held in UTxO
+  , coin ; Total amount deposited for storing inline datums & scripts
+  , coin ; Total amount deposited for registering stake credentials
+  , coin ; Total amount deposited for registering stake pools
+  , coin ; Total amount collected asfees and collaterals
+  )
+
+
+; -- Rewards update / Incremental rewards  -------------------------------------
 ;
 ; This event is emitted on every reward calculation increment happening during the
 ; course of an epoch. It maps stake credentials to a partial rewards amount
@@ -132,6 +160,7 @@ reward-update.incremental-rewards =
   ( epoch                                  ; Epoch at which the rewards will become available
   , { * stake-credential => [ * reward ] } ; Incremental rewards iteration
   )
+
 
 ; ============== ;
 ; Common schemas ;

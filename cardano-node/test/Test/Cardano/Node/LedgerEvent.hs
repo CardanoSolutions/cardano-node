@@ -96,8 +96,18 @@ genLedgerNewEpochEvent =
       <$> genEpoch
       <*> genRewardDistribution
       <*> Gen.set (Range.linear 0 3) genCredential
-  , LedgerStartAtEpoch
+  , LedgerTotalRewards
       <$> genEpoch
+      <*> genRewardDistribution
+  , LedgerTotalAdaPots
+      <$> genCoin
+      <*> genCoin
+      <*> genCoin
+      <*> genCoin
+      <*> genCoin
+      <*> genCoin
+      <*> genCoin
+      <*> genCoin
   ]
 
 genLedgerRewardUpdateEvent :: [Hedgehog.Gen (LedgerRewardUpdateEvent StandardCrypto)]
