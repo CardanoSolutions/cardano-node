@@ -394,41 +394,55 @@ toLedgerEventShelley
   -> Maybe (LedgerEvent (EraCrypto era))
 toLedgerEventShelley evt =
   case unwrapLedgerEvent evt of
-    ShelleyLedgerEventTICK (TickNewEpochEvent (Shelley.TotalRewardEvent epoch rewards)) ->
-      Just $ LedgerNewEpochEvent $ LedgerTotalRewards epoch rewards
-    ShelleyLedgerEventTICK (TickNewEpochEvent (Shelley.RestrainedRewards epoch rewards credentials)) ->
-      Just $ LedgerNewEpochEvent $ LedgerRestrainedRewards epoch rewards credentials
-    ShelleyLedgerEventTICK (TickNewEpochEvent (Shelley.DeltaRewardEvent (RupdEvent epoch rewards))) ->
-      Just $ LedgerRewardUpdateEvent $ LedgerIncrementalRewards epoch rewards
-    ShelleyLedgerEventTICK (TickRupdEvent (RupdEvent epoch rewards)) ->
-      Just $ LedgerRewardUpdateEvent $ LedgerIncrementalRewards epoch rewards
-    ShelleyLedgerEventTICK (TickNewEpochEvent (Shelley.MirEvent transfer)) ->
-      case transfer of
-        MirTransfer (InstantaneousRewards fromReserve fromTreasury deltaReserve deltaTreasury) ->
-          Just $ LedgerNewEpochEvent $ LedgerMirDist fromReserve fromTreasury deltaReserve deltaTreasury
-        NoMirTransfer{} -> -- FIXME: create an event for this
-          Nothing
-    ShelleyLedgerEventTICK (TickNewEpochEvent (Shelley.EpochEvent (Shelley.PoolReapEvent (RetiredPools refunded unclaimed epoch)))) ->
-       Just $ LedgerNewEpochEvent $ LedgerPoolReaping epoch refunded unclaimed
-    ShelleyLedgerEventTICK (TickNewEpochEvent (Shelley.EpochEvent (Shelley.SnapEvent (Shelley.StakeDistEvent stakeDist)))) ->
-      Just $ LedgerNewEpochEvent $ LedgerStakeDistEvent stakeDist
-    ShelleyLedgerEventTICK (TickNewEpochEvent (Shelley.EpochEvent (Shelley.UpecEvent _))) ->
-      -- There isn't any data associated with UpecEvent: Event (EraRule "UPEC" era) ~ Void
-      Nothing
-    ShelleyLedgerEventTICK (TickNewEpochEvent (Shelley.TotalAdaPotsEvent adaPots)) -> -- TODO: create an event for this
-      Just
-        $ LedgerNewEpochEvent
-        $ LedgerTotalAdaPots
-            (ShelleyAPI.treasuryAdaPot adaPots)
-            (ShelleyAPI.reservesAdaPot adaPots)
-            (ShelleyAPI.rewardsAdaPot adaPots)
-            (ShelleyAPI.utxoAdaPot adaPots)
-            (ShelleyAPI.keyDepositAdaPot adaPots)
-            (ShelleyAPI.poolDepositAdaPot adaPots)
-            (ShelleyAPI.depositsAdaPot adaPots)
-            (ShelleyAPI.feesAdaPot adaPots)
+    ShelleyLedgerEventTICK tickEvent ->
+      case tickEvent of
+        TickNewEpochEvent newEpochEvent ->
+          case newEpochEvent of
+            Shelley.TotalRewardEvent epoch rewards ->
+              liftNewEpoch $ LedgerTotalRewards epoch rewards
+
+            Shelley.RestrainedRewards epoch rewards credentials ->
+              liftNewEpoch $ LedgerRestrainedRewards epoch rewards credentials
+
+            Shelley.MirEvent transfer ->
+              case transfer of
+                MirTransfer (InstantaneousRewards fromReserve fromTreasury deltaReserve deltaTreasury) ->
+                  liftNewEpoch $ LedgerMirDist fromReserve fromTreasury deltaReserve deltaTreasury
+                NoMirTransfer{} -> -- FIXME: create an event for this
+                  Nothing
+
+            Shelley.EpochEvent (Shelley.PoolReapEvent (RetiredPools refunded unclaimed epoch)) ->
+               liftNewEpoch $ LedgerPoolReaping epoch refunded unclaimed
+
+            Shelley.EpochEvent (Shelley.SnapEvent (Shelley.StakeDistEvent stakeDist)) ->
+              liftNewEpoch $ LedgerStakeDistEvent stakeDist
+
+            Shelley.EpochEvent (Shelley.UpecEvent _) ->
+              -- There isn't any data associated with UpecEvent: Event (EraRule "UPEC" era) ~ Void
+              Nothing
+
+            Shelley.TotalAdaPotsEvent adaPots ->
+              liftNewEpoch $ LedgerTotalAdaPots
+                (ShelleyAPI.treasuryAdaPot adaPots)
+                (ShelleyAPI.reservesAdaPot adaPots)
+                (ShelleyAPI.rewardsAdaPot adaPots)
+                (ShelleyAPI.utxoAdaPot adaPots)
+                (ShelleyAPI.keyDepositAdaPot adaPots)
+                (ShelleyAPI.poolDepositAdaPot adaPots)
+                (ShelleyAPI.depositsAdaPot adaPots)
+                (ShelleyAPI.feesAdaPot adaPots)
+
+            Shelley.DeltaRewardEvent (RupdEvent epoch rewards) ->
+              liftRewardUpdate $ LedgerIncrementalRewards epoch rewards
+
+        TickRupdEvent (RupdEvent epoch rewards) ->
+          liftRewardUpdate $ LedgerIncrementalRewards epoch rewards
+
     ShelleyLedgerEventBBODY _ ->
       Just LedgerBody
+ where
+  liftNewEpoch = Just . LedgerNewEpochEvent
+  liftRewardUpdate = Just . LedgerRewardUpdateEvent
 
 type ConwayEventsConstraints era =
   ( Event (Ledger.EraRule "TICK" era) ~ ShelleyTickEvent era
