@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
 
@@ -17,9 +18,8 @@ import           Data.ByteString.Short (ShortByteString, toShort)
 import           Data.Map (Map)
 import           Data.Maybe (fromJust)
 import           Data.String (IsString(..))
-import           Data.Set (Set)
 import           Data.Text (Text)
-import           Hedgehog (Property, discover, footnote, (===))
+import           Hedgehog (Property, discover, footnote)
 import qualified Hedgehog
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
@@ -52,7 +52,13 @@ prop_LedgerEvent_CDDL_conformance =
   -- This requires the `cddl-cat` Rust crate to support the '.cbor' control
   -- operator which should make for a straightforward and nice contribution.
   let bytes = serialize' version (ledgerEvent event)
-  CDDL.validate specification bytes === Right ()
+  case CDDL.validate specification bytes of
+    Right () ->
+      Hedgehog.success
+    Left (CDDL.ValidationError { CDDL.cbor = cbor, CDDL.hint = hint }) -> do
+      Hedgehog.footnote hint
+      Hedgehog.footnote cbor
+      Hedgehog.failure
 
 --
 -- Generators

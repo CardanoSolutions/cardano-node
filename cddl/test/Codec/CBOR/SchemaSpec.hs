@@ -11,7 +11,7 @@ import Test.Hspec (Spec, SpecWith, context, specify, shouldBe)
 spec :: Spec
 spec = context "Codec.CBOR.SchemaSpec" $ do
   specifyCddl "Primitive / Int"
-    "rule = int"
+    "rule = uint"
     "182A"
 
 specifyCddl
