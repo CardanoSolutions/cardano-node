@@ -36,7 +36,6 @@ ledger-event.epoch =
 
 ledger-event.reward-update =
   [  0, reward-update.incremental-rewards
-  // 1, reward-update.delta-rewards
   ]
 
 ledger-event.body =
@@ -45,7 +44,7 @@ ledger-event.body =
 ledger-event.tick =
   any
 
-; -- Epoch / MIR Distribution --------------------------------------------------
+; -- Epoch / MIR distribution --------------------------------------------------
 ;
 ; Describes any tokens that are being added to reward accounts via MIR
 ; certificates.
@@ -59,7 +58,7 @@ epoch.mir-distribution =
   )
 
 
-; -- Epoch / Stake Pool Reaping ------------------------------------------------
+; -- Epoch / Stake pool reaping ------------------------------------------------
 ;
 ; Provides information about retired stake pools. In particular, it provides
 ; all stake pool registration deposit amounts which are being returned.
@@ -83,7 +82,7 @@ epoch.stake-pool-reaping =
   )
 
 
-; -- Epoch / Stake Distribution ------------------------------------------------
+; -- Epoch / Stake distribution ------------------------------------------------
 ;
 ; A new stake distribution snapshot is taken on every epoch boundary,
 ; corresponding to the "mark" snapshot as described in the Shelley ledger formal
@@ -98,8 +97,21 @@ epoch.stake-distribution =
   ( { * stake-credential => [ coin, pool-id ] }
   )
 
+; -- Epoch / Restrained rewards ------------------------------------------------
+;
+; Describes rewards which are calculated by the ledger, but are not delivered to
+; a reward account. This happens, for example, when a reward account is
+; de-registered before the rewards are delivered to it.
+;
+; It also happened due to a bug during the Shelley era (Section 17.4). These two
+; cases are distinguished in the event.
+;
+;                                  → This event only occurs on epoch boundaries.
 epoch.restrained-rewards =
-  any
+  ( epoch
+  , { * stake-credential => [ 1* reward ] } ; Ignored rewards due to ledger bug in Shelley
+  , [ * stake-credential ]                  ; unregistered credentials which can no longer receive rewards
+  )
 
 epoch.total-rewards =
   any
@@ -107,15 +119,16 @@ epoch.total-rewards =
 epoch.starts-at =
   epoch
 
-; -- Epoch / Incremental Rewards  ------------------------------------------------
+; -- Epoch / Incremental rewards  ------------------------------------------------
+;
+; This event is emitted on every reward calculation increment happening during the
+; course of an epoch. It maps stake credentials to a partial rewards amount
+; calculated so far.
+;
+; The epoch attached to this event refers to the epoch in which the rewards becomes
+; available; which is one epoch AFTER their calculation.
 ;
 reward-update.incremental-rewards =
-  ( epoch                                  ; Epoch at which the rewards will become available
-  , { * stake-credential => [ * reward ] } ; Incremental rewards iteration
-  )
-
-
-reward-update.delta-rewards =
   ( epoch                                  ; Epoch at which the rewards will become available
   , { * stake-credential => [ * reward ] } ; Incremental rewards iteration
   )

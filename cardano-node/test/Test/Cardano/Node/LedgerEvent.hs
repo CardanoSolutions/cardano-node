@@ -17,6 +17,7 @@ import           Data.ByteString.Lazy(fromStrict)
 import           Data.ByteString.Short (ShortByteString, toShort)
 import           Data.Map (Map)
 import           Data.Maybe (fromJust)
+import           Data.Set (Set)
 import           Data.String (IsString(..))
 import           Data.Text (Text)
 import           Hedgehog (Property, discover, footnote)
@@ -73,13 +74,13 @@ genAnchoredEvent =
   AnchoredEvent
     <$> genBlockHeaderHash
     <*> genSlotNo
-    <*> Gen.choice
-      [ LedgerNewEpochEvent <$> genLedgerNewEpochEvent
-      , LedgerRewardUpdateEvent <$> genLedgerRewardUpdateEvent
-      ]
+    <*> Gen.choice (mconcat
+      [ fmap LedgerNewEpochEvent <$> genLedgerNewEpochEvent
+      , fmap LedgerRewardUpdateEvent <$> genLedgerRewardUpdateEvent
+      ])
 
-genLedgerNewEpochEvent :: Hedgehog.Gen (LedgerNewEpochEvent StandardCrypto)
-genLedgerNewEpochEvent = Gen.choice
+genLedgerNewEpochEvent :: [Hedgehog.Gen (LedgerNewEpochEvent StandardCrypto)]
+genLedgerNewEpochEvent =
   [ LedgerMirDist
       <$> genStakeDistribution
       <*> genStakeDistribution
@@ -91,16 +92,17 @@ genLedgerNewEpochEvent = Gen.choice
       <*> genStakePoolRefunds
   , LedgerStakeDistEvent
       <$> genExtendedStakeDistribution
+  , LedgerRestrainedRewards
+      <$> genEpoch
+      <*> genRewardDistribution
+      <*> Gen.set (Range.linear 0 3) genCredential
   , LedgerStartAtEpoch
       <$> genEpoch
   ]
 
-genLedgerRewardUpdateEvent :: Hedgehog.Gen (LedgerRewardUpdateEvent StandardCrypto)
-genLedgerRewardUpdateEvent = Gen.choice
+genLedgerRewardUpdateEvent :: [Hedgehog.Gen (LedgerRewardUpdateEvent StandardCrypto)]
+genLedgerRewardUpdateEvent =
   [ LedgerIncrementalRewards
-      <$> genEpoch
-      <*> genRewardDistribution
-  , LedgerDeltaRewards
       <$> genEpoch
       <*> genRewardDistribution
   ]
@@ -141,9 +143,9 @@ genReward = Reward
   <*> genKeyHash
   <*> genCoin
 
-genRewardDistribution :: Hedgehog.Gen (Map StakeCredential [Reward StandardCrypto])
+genRewardDistribution :: Hedgehog.Gen (Map StakeCredential (Set (Reward StandardCrypto)))
 genRewardDistribution =
-  genStakeCredentialMap $ Gen.list (Range.linear 1 3) genReward
+  genStakeCredentialMap $ Gen.set (Range.linear 1 3) genReward
 
 genScriptHash :: Hedgehog.Gen (ScriptHash StandardCrypto)
 genScriptHash =
