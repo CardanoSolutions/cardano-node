@@ -9,9 +9,9 @@ rule =
   ledger-event
 
 anchored-event =
-  { 0: block-header-hash       ; The block header hash from where this event was emitted.
-  , 1: slot                    ; The slot number corresponding to the aforementioned header hash.
-  , 2: ledger-event            ; The actual ledger event.
+  { 0: block-header-hash ; The block header hash from where this event was emitted.
+  , 1: slot              ; The slot number corresponding to the aforementioned header hash.
+  , 2: ledger-event      ; The actual ledger event.
   }
 
 ; ============= ;
@@ -20,42 +20,83 @@ anchored-event =
 
 ledger-event =
   [  0, ledger-event.epoch
-  // 1, ledger-event.body
-  // 2, ledger-event.tick
+  // 1, ledger-event.reward-update
+  // 2, ledger-event.body
+  // 3, ledger-event.tick
   ]
 
 ledger-event.epoch =
   [  0, epoch.mir-distribution
   // 1, epoch.stake-pool-reaping
   // 2, epoch.stake-distribution
-  // 3, epoch.incremental-rewards
-  // 4, epoch.delta-rewards
-  // 5, epoch.restrained-rewards
-  // 6, epoch.total-rewards
-  // 7, epoch.starts-at
+  // 3, epoch.restrained-rewards
+  // 4, epoch.total-rewards
+  // 5, epoch.starts-at
   ]
 
+ledger-event.reward-update =
+  [  0, reward-update.incremental-rewards
+  // 1, reward-update.delta-rewards
+  ]
+
+ledger-event.body =
+  any
+
+ledger-event.tick =
+  any
+
+; -- Epoch / MIR Distribution --------------------------------------------------
+;
+; Describes any tokens that are being added to reward accounts via MIR
+; certificates.
+;
+;                                  → This event only occurs on epoch boundaries.
 epoch.mir-distribution =
-  ( stake-distribution ; Rewards paid from the Reserve into stake credentials
-  , stake-distribution ; Rewards paid from the Treasury into stake credentials
-  , delta-coin         ; Transfer from the Reserve into the Treasury
-  , delta-coin         ; Transfer from the Treasury into the Reserve
+  ( { * stake-credential => coin } ; Rewards paid from the Reserve into stake credentials
+  , { * stake-credential => coin } ; Rewards paid from the Treasury into stake credentials
+  , delta-coin                     ; Transfer from the Reserve into the Treasury
+  , delta-coin                     ; Transfer from the Treasury into the Reserve
   )
 
+
+; -- Epoch / Stake Pool Reaping ------------------------------------------------
+;
+; Provides information about retired stake pools. In particular, it provides
+; all stake pool registration deposit amounts which are being returned.
+;
+; When a stake pool retires, a refund of the deposit is sent to the declared
+; reward account of the stake pool. Note that any given stake credential can be
+; registered to multiple stake pools as reward account. Which is why the
+; 'refund-distribution' goes from a stake credential (the reward account), to a
+; map of pool identifiers.
+;
+; The second 'refund-distribution' holds unclaimed deposits which corresponds
+; to ; deposits that ought to have been returned but for which the reward
+; account did no longer exist (because its owner had already de-registered it).
+; Those rewards end up being sent to the Treasury.
+;
+;                                  → This event only occurs on epoch boundaries.
 epoch.stake-pool-reaping =
-  ( epoch
-  , refund-distribution
-  , refund-distribution
+  ( epoch                                            ; Epoch in which the pool reaping occurs
+  , { * stake-credential => { 1* pool-id => coin } } ; Stake pools refunds after retirement
+  , { * stake-credential => { 1* pool-id => coin } } ; Unclaimed deposit after retirement
   )
 
+
+; -- Epoch / Stake Distribution ------------------------------------------------
+;
+; A new stake distribution snapshot is taken on every epoch boundary,
+; corresponding to the "mark" snapshot as described in the Shelley ledger formal
+; specification.
+;
+; This event provides the new snapshot which is a map from registered stake
+; credentials to the stake pool it is registered to and the amount of stake (in
+; lovelace) that it controls.
+;
+;                                  → This event only occurs on epoch boundaries.
 epoch.stake-distribution =
-  any
-
-epoch.incremental-rewards =
-  any
-
-epoch.delta-rewards =
-  any
+  ( { * stake-credential => [ coin, pool-id ] }
+  )
 
 epoch.restrained-rewards =
   any
@@ -66,11 +107,18 @@ epoch.total-rewards =
 epoch.starts-at =
   epoch
 
-ledger-event.body =
-  any
+; -- Epoch / Incremental Rewards  ------------------------------------------------
+;
+reward-update.incremental-rewards =
+  ( epoch                                  ; Epoch at which the rewards will become available
+  , { * stake-credential => [ * reward ] } ; Incremental rewards iteration
+  )
 
-ledger-event.tick =
-  any
+
+reward-update.delta-rewards =
+  ( epoch                                  ; Epoch at which the rewards will become available
+  , { * stake-credential => [ * reward ] } ; Incremental rewards iteration
+  )
 
 ; ============== ;
 ; Common schemas ;
@@ -91,19 +139,16 @@ epoch =
 pool-id =
   $hash28
 
-refund-distribution =
-  { * stake-credential => { * $hash28 => coin } }
-
 reward =
-  { 0: reward-type
-  , 1: pool-id
-  , 2: coin
-  }
+  [ reward-type
+  , pool-id
+  , coin
+  ]
 
 reward-type =
-  [  0 ; member rewards
-  // 1 ; leader rewards
-  ]
+  ( 0 ; member rewards
+  / 1 ; leader rewards
+  )
 
 slot =
   uint
@@ -112,10 +157,6 @@ stake-credential =
   [  0, $hash28   ; Key hash digest
   // 1, $hash28   ; Script hash digest
   ]
-
-stake-distribution =
-  { * stake-credential => coin
-  }
 
 version =
   uint

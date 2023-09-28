@@ -22,6 +22,7 @@ module Cardano.Node.LedgerEvent (
     AnchoredEvent (..)
   , LedgerEvent (..)
   , LedgerNewEpochEvent (..)
+  , LedgerRewardUpdateEvent (..)
   , deserializeAnchoredEvent
   , serializeAnchoredEvent
   , ledgerEventName
@@ -119,6 +120,7 @@ type LedgerState crypto =
 
 data LedgerEvent crypto
   = LedgerNewEpochEvent !(LedgerNewEpochEvent crypto)
+  | LedgerRewardUpdateEvent !(LedgerRewardUpdateEvent crypto)
   -- TODO complete those vvv
   | LedgerBody
   -- | LedgerUtxoTotalDeposits
@@ -127,6 +129,36 @@ data LedgerEvent crypto
   -- | LedgerReRegisterPool
   | LedgerTick
   deriving (Eq, Show)
+
+-- TODO: Review encoding & make future-proof (i.e. favor records over lists/tuples)
+instance Crypto crypto => EncCBOR (LedgerEvent crypto) where
+  encCBOR = encode . \case
+    LedgerNewEpochEvent e ->
+      Sum LedgerNewEpochEvent 0
+        !> To e
+    LedgerRewardUpdateEvent e ->
+      Sum LedgerRewardUpdateEvent 1
+        !> To e
+    LedgerBody ->
+      Sum LedgerBody 2
+    LedgerTick ->
+      Sum LedgerTick 3
+
+instance Crypto crypto => DecCBOR (LedgerEvent crypto) where
+  decCBOR = decode (Summands "LedgerEvent" decRaw)
+    where
+      decRaw 0 =
+        SumD LedgerNewEpochEvent
+          <! From
+      decRaw 1 =
+        SumD LedgerRewardUpdateEvent
+          <! From
+      decRaw 2 =
+        SumD LedgerBody
+      decRaw 3 =
+        SumD LedgerTick
+      decRaw n = Invalid n
+
 
 -- TODO(KtorZ): Discuss that design choice; I believe we should favor a more
 -- 'flat' structure for events instead of preserving whatever the ledger imposes
@@ -143,19 +175,14 @@ data LedgerNewEpochEvent crypto
         -- ^ Transfer from the __Treasury__ into the __Reserve__
   | LedgerPoolReaping
       !EpochNo
-        -- ^ Epoch from which the event is emitted
+        -- ^ Epoch for which the event is emitted
       !(Map (Credential 'Staking crypto) (Map (KeyHash 'StakePool crypto) Coin))
         -- ^ Stake pools refunds after retirement
       !(Map (Credential 'Staking crypto) (Map (KeyHash 'StakePool crypto) Coin))
         -- ^ Unclaimed deposit after retirement, for stake credentials that no longer exist.
   | LedgerStakeDistEvent
       !(Map (Credential 'Staking crypto) (Coin, KeyHash 'StakePool crypto))
-  | LedgerIncrementalRewards
-      !EpochNo
-      !(Map (Credential 'Staking crypto) (Set (Reward crypto)))
-  | LedgerDeltaRewards
-      !EpochNo
-      !(Map (Credential 'Staking crypto) (Set (Reward crypto)))
+        -- ^ Stake controlled and delegated by registered credentials at an epoch boundary
   | LedgerRestrainedRewards
       !EpochNo
       !(Map (Credential 'Staking crypto) (Set (Reward crypto)))
@@ -183,13 +210,6 @@ data LedgerNewEpochEvent crypto
   | LedgerStartAtEpoch !EpochNo
   deriving (Eq, Show)
 
--- TODO: Review encoding & make future-proof (i.e. favor records over lists/tuples)
-instance Crypto crypto => EncCBOR (LedgerEvent crypto) where
-  encCBOR = encode . \case
-    LedgerNewEpochEvent e -> Sum LedgerNewEpochEvent 0 !> To e
-    LedgerBody -> Sum LedgerBody 1
-    LedgerTick -> Sum LedgerTick 2
-
 instance Crypto crypto => EncCBOR (LedgerNewEpochEvent crypto) where
   encCBOR = encode . \case
     LedgerMirDist fromReserve fromTreasury deltaReserve deltaTreasury ->
@@ -206,28 +226,20 @@ instance Crypto crypto => EncCBOR (LedgerNewEpochEvent crypto) where
     LedgerStakeDistEvent stakeDist ->
       Sum LedgerStakeDistEvent 2
         !> To stakeDist
-    LedgerIncrementalRewards epoch rewards ->
-      Sum LedgerIncrementalRewards 3
-        !> To epoch
-        !> To rewards
-    LedgerDeltaRewards epoch rewards ->
-      Sum LedgerDeltaRewards 4
-        !> To epoch
-        !> To rewards
     LedgerRestrainedRewards epoch rewards credentials ->
-      Sum LedgerRestrainedRewards 5
+      Sum LedgerRestrainedRewards 3
         !> To epoch
         !> To rewards
         !> To credentials
     LedgerTotalRewards epoch rewards ->
-      Sum LedgerTotalRewards 6
+      Sum LedgerTotalRewards 4
         !> To epoch
         !> To rewards
     LedgerStartAtEpoch epoch ->
-      Sum LedgerStartAtEpoch 7
+      Sum LedgerStartAtEpoch 5
         !> To epoch
     LedgerTotalAdaPots treasuryAdaPot reservesAdaPot rewardsAdaPot utxoAdaPot keyDepositAdaPot poolDepositAdaPot depositsAdaPot feesAdaPot ->
-      Sum LedgerTotalAdaPots 8
+      Sum LedgerTotalAdaPots 6
         !> To treasuryAdaPot
         !> To reservesAdaPot
         !> To rewardsAdaPot
@@ -237,53 +249,86 @@ instance Crypto crypto => EncCBOR (LedgerNewEpochEvent crypto) where
         !> To depositsAdaPot
         !> To feesAdaPot
 
-instance Crypto crypto => DecCBOR (LedgerEvent crypto) where
-  decCBOR = decode (Summands "LedgerEvent" decRaw)
-    where
-      decRaw 0 = SumD LedgerNewEpochEvent <! From
-      decRaw 1 = SumD LedgerBody
-      decRaw 2 = SumD LedgerTick
-      decRaw n = Invalid n
-
 instance Crypto crypto => DecCBOR (LedgerNewEpochEvent crypto) where
   decCBOR = decode (Summands "LedgerNewEpochEvent" decRaw)
     where
-      decRaw 0 = SumD LedgerMirDist
+      decRaw 0 =
+        SumD LedgerMirDist
+          <! From
+          <! From
+          <! From
+          <! From
+      decRaw 1 =
+        SumD LedgerPoolReaping
+          <! From
+          <! From
+          <! From
+      decRaw 2 =
+        SumD LedgerStakeDistEvent
+          <! From
+      decRaw 3 =
+        SumD LedgerRestrainedRewards
+          <! From
+          <! From
+          <! From
+      decRaw 4 =
+        SumD LedgerTotalRewards
+          <! From
+          <! From
+      decRaw 5 =
+        SumD LedgerStartAtEpoch
+          <! From
+      decRaw 6 =
+        SumD LedgerTotalAdaPots
+          <! From
+          <! From
+          <! From
+          <! From
+          <! From
+          <! From
+          <! From
+          <! From
+      decRaw n =
+        Invalid n
+
+
+-- TODO: Clarify whether we need to distinguish these two events. 'DeltaRewards'
+-- is only emitted once per epoch as a last step in the incremental rewards
+-- calculation. It may be superfluous to keep that distinction around.
+data LedgerRewardUpdateEvent crypto
+  = LedgerIncrementalRewards
+      !EpochNo
+        -- ^ Epoch at which those rewards will become available.
+      !(Map (Credential 'Staking crypto) [Reward crypto])
+  | LedgerDeltaRewards
+      !EpochNo
+        -- ^ Epoch at which those rewards will become available.
+      !(Map (Credential 'Staking crypto) [Reward crypto])
+        -- ^ Reward increment
+  deriving (Eq, Show)
+
+instance Crypto crypto => EncCBOR (LedgerRewardUpdateEvent crypto) where
+  encCBOR = encode . \case
+    LedgerIncrementalRewards epoch rewards ->
+      Sum LedgerIncrementalRewards 0
+        !> To epoch
+        !> To rewards
+    LedgerDeltaRewards epoch rewards ->
+      Sum LedgerDeltaRewards 1
+        !> To epoch
+        !> To rewards
+
+instance Crypto crypto => DecCBOR (LedgerRewardUpdateEvent crypto) where
+  decCBOR = decode (Summands "LedgerRewardUpdateEvent" decRaw)
+    where
+      decRaw 0 = SumD LedgerIncrementalRewards
         <! From
         <! From
+      decRaw 1 = SumD LedgerDeltaRewards
         <! From
         <! From
-      decRaw 1 = SumD LedgerPoolReaping
-        <! From
-        <! From
-        <! From
-      decRaw 2 = SumD LedgerStakeDistEvent
-        <! From
-      decRaw 3 = SumD LedgerIncrementalRewards
-        <! From
-        <! From
-      decRaw 4 = SumD LedgerDeltaRewards
-        <! From
-        <! From
-      decRaw 5 = SumD LedgerRestrainedRewards
-        <! From
-        <! From
-        <! From
-      decRaw 6 = SumD LedgerTotalRewards
-        <! From
-        <! From
-      decRaw 7 = SumD LedgerStartAtEpoch
-        <! From
-      decRaw 8 = SumD LedgerTotalAdaPots
-        <! From
-        <! From
-        <! From
-        <! From
-        <! From
-        <! From
-        <! From
-        <! From
-      decRaw n = Invalid n
+      decRaw n =
+        Invalid n
 
 -- | Parse a 'Credential 'Staking' from a stake address in base16.
 parseStakeCredential :: String -> Maybe (Credential 'Staking StandardCrypto)
@@ -295,23 +340,25 @@ parseStakeCredential str =
 instance Ord (LedgerEvent crypto) where
   a <= b = toOrdering a <= toOrdering b
 
+-- TODO: Review order once we're done with the type modeling
 toOrdering :: LedgerEvent crypto -> Int
 toOrdering = \case
-  LedgerNewEpochEvent LedgerMirDist {}            -> 0
-  LedgerNewEpochEvent LedgerPoolReaping {}        -> 1
-  LedgerNewEpochEvent LedgerStakeDistEvent {}     -> 2
-  LedgerNewEpochEvent LedgerIncrementalRewards {} -> 3
-  LedgerNewEpochEvent LedgerDeltaRewards {}       -> 4
-  LedgerNewEpochEvent LedgerRestrainedRewards {}  -> 5
-  LedgerNewEpochEvent LedgerTotalRewards {}       -> 6
-  LedgerNewEpochEvent LedgerStartAtEpoch {}       -> 7
-  LedgerNewEpochEvent LedgerTotalAdaPots {}       -> 8
-  LedgerBody                                      -> 9
-  LedgerTick                                      -> 10
+  LedgerNewEpochEvent LedgerMirDist {}                -> 0
+  LedgerNewEpochEvent LedgerPoolReaping {}            -> 1
+  LedgerNewEpochEvent LedgerStakeDistEvent {}         -> 2
+  LedgerRewardUpdateEvent LedgerIncrementalRewards {} -> 3
+  LedgerRewardUpdateEvent LedgerDeltaRewards {}       -> 4
+  LedgerNewEpochEvent LedgerRestrainedRewards {}      -> 5
+  LedgerNewEpochEvent LedgerTotalRewards {}           -> 6
+  LedgerNewEpochEvent LedgerStartAtEpoch {}           -> 7
+  LedgerNewEpochEvent LedgerTotalAdaPots {}           -> 8
+  LedgerBody                                          -> 9
+  LedgerTick                                          -> 10
 
 ledgerEventName :: LedgerEvent crypto -> Text
 ledgerEventName = \case
-  LedgerNewEpochEvent e -> ledgerNewEpochEventName e
+  LedgerNewEpochEvent e       -> ledgerNewEpochEventName e
+  LedgerRewardUpdateEvent e   -> ledgerRewardUpdateEventName e
   LedgerBody {}               -> "LedgerBody"
   LedgerTick {}               -> "LedgerTick"
 
@@ -320,12 +367,15 @@ ledgerNewEpochEventName = \case
   LedgerMirDist {}            -> "LedgerMirDist"
   LedgerPoolReaping {}        -> "LedgerPoolReaping"
   LedgerStakeDistEvent {}     -> "LedgerStakeDistEvent"
-  LedgerIncrementalRewards {} -> "LedgerIncrementalRewards"
-  LedgerDeltaRewards {}       -> "LedgerDeltaRewards"
   LedgerRestrainedRewards {}  -> "LedgerRestrainedRewards"
   LedgerTotalRewards {}       -> "LedgerTotalRewards"
   LedgerStartAtEpoch {}       -> "LedgerStartAtEpoch"
   LedgerTotalAdaPots {}       -> "LedgerTotalAdaPots"
+
+ledgerRewardUpdateEventName :: LedgerRewardUpdateEvent crypto -> Text
+ledgerRewardUpdateEventName = \case
+  LedgerIncrementalRewards {} -> "LedgerIncrementalRewards"
+  LedgerDeltaRewards {}       -> "LedgerDeltaRewards"
 
 fromAuxLedgerEvent
   :: forall xs crypto. (All ConvertLedgerEvent xs, crypto ~ StandardCrypto)
@@ -371,9 +421,9 @@ toLedgerEventShelley evt =
     ShelleyLedgerEventTICK (TickNewEpochEvent (Shelley.RestrainedRewards epoch rewards credentials)) ->
       Just $ LedgerNewEpochEvent $ LedgerRestrainedRewards epoch rewards credentials
     ShelleyLedgerEventTICK (TickNewEpochEvent (Shelley.DeltaRewardEvent (RupdEvent epoch rewards))) ->
-      Just $ LedgerNewEpochEvent $ LedgerDeltaRewards epoch rewards
+      Just $ LedgerRewardUpdateEvent $ LedgerDeltaRewards epoch (Set.toList <$> rewards)
     ShelleyLedgerEventTICK (TickRupdEvent (RupdEvent epoch rewards)) ->
-      Just $ LedgerNewEpochEvent $ LedgerIncrementalRewards epoch rewards
+      Just $ LedgerRewardUpdateEvent $ LedgerIncrementalRewards epoch (Set.toList <$> rewards)
     ShelleyLedgerEventTICK (TickNewEpochEvent (Shelley.MirEvent transfer)) ->
       case transfer of
         MirTransfer (InstantaneousRewards fromReserve fromTreasury deltaReserve deltaTreasury) ->
@@ -424,7 +474,7 @@ toConwayEventShelley evt =
     ShelleyLedgerEventTICK (TickNewEpochEvent (Conway.RestrainedRewards epoch rewards credentials)) ->
       Just $ LedgerNewEpochEvent $ LedgerRestrainedRewards epoch rewards credentials
     ShelleyLedgerEventTICK (TickNewEpochEvent (Conway.DeltaRewardEvent (RupdEvent epoch rewards))) ->
-      Just $ LedgerNewEpochEvent $ LedgerDeltaRewards epoch rewards
+      Just $ LedgerRewardUpdateEvent $ LedgerDeltaRewards epoch (Set.toList <$> rewards)
     ShelleyLedgerEventTICK (TickNewEpochEvent (Conway.DeltaRewardEvent _)) ->
       Nothing -- Or else getting "Pattern not exhaustif" warning, but can't seem to find the missing constructor.
     ShelleyLedgerEventTICK (TickNewEpochEvent (Conway.EpochEvent (Conway.PoolReapEvent (RetiredPools refunded unclaimed epoch)))) ->
@@ -446,7 +496,7 @@ toConwayEventShelley evt =
             (ShelleyAPI.depositsAdaPot adaPots)
             (ShelleyAPI.feesAdaPot adaPots)
     ShelleyLedgerEventTICK (TickRupdEvent (RupdEvent epoch rewards)) ->
-      Just $ LedgerNewEpochEvent $ LedgerIncrementalRewards epoch rewards
+      Just $ LedgerRewardUpdateEvent $ LedgerIncrementalRewards epoch (Set.toList <$> rewards)
     ShelleyLedgerEventBBODY _ ->
       Nothing
 

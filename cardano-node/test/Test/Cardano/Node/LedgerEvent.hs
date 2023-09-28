@@ -13,10 +13,11 @@ import qualified Codec.CBOR.Schema as CDDL
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString.Base16 as Hex
 import           Data.ByteString.Lazy(fromStrict)
-import           Data.ByteString.Short (toShort)
+import           Data.ByteString.Short (ShortByteString, toShort)
 import           Data.Map (Map)
 import           Data.Maybe (fromJust)
 import           Data.String (IsString(..))
+import           Data.Set (Set)
 import           Data.Text (Text)
 import           Hedgehog (Property, discover, footnote, (===))
 import qualified Hedgehog
@@ -29,6 +30,7 @@ import qualified Data.Text.IO as TIO
 specification :: Text
 specification =
   unsafePerformIO $ TIO.readFile "./ledger_events.cddl"
+{-# NOINLINE specification #-}
 
 prop_roundtrip_LedgerEvent_CBOR :: Property
 prop_roundtrip_LedgerEvent_CBOR =
@@ -56,13 +58,18 @@ prop_LedgerEvent_CDDL_conformance =
 -- Generators
 --
 
+type StakePoolId = KeyHash 'StakePool StandardCrypto
+
+type StakeCredential = Credential 'Staking StandardCrypto
+
 genAnchoredEvent :: Hedgehog.Gen AnchoredEvent
 genAnchoredEvent =
   AnchoredEvent
-    <$> (toShort <$> Gen.bytes (Range.constant 32 32))
-    <*> (fromIntegral <$> Gen.word64 Range.constantBounded)
+    <$> genBlockHeaderHash
+    <*> genSlotNo
     <*> Gen.choice
       [ LedgerNewEpochEvent <$> genLedgerNewEpochEvent
+      , LedgerRewardUpdateEvent <$> genLedgerRewardUpdateEvent
       ]
 
 genLedgerNewEpochEvent :: Hedgehog.Gen (LedgerNewEpochEvent StandardCrypto)
@@ -76,15 +83,31 @@ genLedgerNewEpochEvent = Gen.choice
       <$> genEpoch
       <*> genStakePoolRefunds
       <*> genStakePoolRefunds
+  , LedgerStakeDistEvent
+      <$> genExtendedStakeDistribution
   , LedgerStartAtEpoch
       <$> genEpoch
   ]
+
+genLedgerRewardUpdateEvent :: Hedgehog.Gen (LedgerRewardUpdateEvent StandardCrypto)
+genLedgerRewardUpdateEvent = Gen.choice
+  [ LedgerIncrementalRewards
+      <$> genEpoch
+      <*> genRewardDistribution
+  , LedgerDeltaRewards
+      <$> genEpoch
+      <*> genRewardDistribution
+  ]
+
+genBlockHeaderHash :: Hedgehog.Gen ShortByteString
+genBlockHeaderHash =
+  toShort <$> Gen.bytes (Range.constant 32 32)
 
 genCoin :: Hedgehog.Gen Coin
 genCoin =
   Coin . fromIntegral <$> Gen.word32 Range.constantBounded
 
-genCredential :: Hedgehog.Gen (Credential 'Staking StandardCrypto)
+genCredential :: Hedgehog.Gen StakeCredential
 genCredential = Gen.choice
   [ ScriptHashObj <$> genScriptHash
   , KeyHashObj <$> genKeyHash
@@ -98,41 +121,47 @@ genEpoch :: Hedgehog.Gen EpochNo
 genEpoch =
   fromIntegral <$> Gen.word16 Range.constantBounded
 
+genExtendedStakeDistribution :: Hedgehog.Gen (Map StakeCredential (Coin, StakePoolId))
+genExtendedStakeDistribution =
+  genStakeCredentialMap $ (,) <$> genCoin <*> genKeyHash
+
 genKeyHash :: Hedgehog.Gen (KeyHash any StandardCrypto)
 genKeyHash =
   KeyHash . unsafeHashFromBytes <$> Gen.bytes (Range.singleton 28)
+
+genReward :: Hedgehog.Gen (Reward StandardCrypto)
+genReward = Reward
+  <$> Gen.enumBounded
+  <*> genKeyHash
+  <*> genCoin
+
+genRewardDistribution :: Hedgehog.Gen (Map StakeCredential [Reward StandardCrypto])
+genRewardDistribution =
+  genStakeCredentialMap $ Gen.list (Range.linear 1 3) genReward
 
 genScriptHash :: Hedgehog.Gen (ScriptHash StandardCrypto)
 genScriptHash =
   ScriptHash . unsafeHashFromBytes <$> Gen.bytes (Range.singleton 28)
 
-genStakeDistribution :: Hedgehog.Gen (Map (Credential 'Staking StandardCrypto) Coin)
-genStakeDistribution =
-  Gen.map
-    (Range.linear 0 3)
-    ((,) <$> genCredential <*> genCoin)
+genSlotNo :: Hedgehog.Gen SlotNo
+genSlotNo =
+  fromIntegral <$> Gen.word64 Range.constantBounded
 
-genStakePoolRefunds
-  :: Hedgehog.Gen
-      (Map
-        (Credential 'Staking StandardCrypto)
-        (Map
-          (KeyHash 'StakePool StandardCrypto)
-          Coin
-        )
-      )
+genStakeDistribution :: Hedgehog.Gen (Map StakeCredential Coin)
+genStakeDistribution =
+  genStakeCredentialMap genCoin
+
+genStakePoolRefunds :: Hedgehog.Gen (Map StakeCredential (Map StakePoolId Coin))
 genStakePoolRefunds =
-  Gen.map
-    (Range.linear 0 3)
-    ((,) <$> genCredential
-         <*> Gen.map
-               (Range.linear 0 3)
-               ((,) <$> genKeyHash <*> genCoin)
-    )
+  genStakeCredentialMap $ Gen.map (Range.linear 1 3) $ (,) <$> genKeyHash <*> genCoin
 
 --
 -- Helpers
 --
+
+genStakeCredentialMap :: Hedgehog.Gen a -> Hedgehog.Gen (Map StakeCredential a)
+genStakeCredentialMap genValue =
+  Gen.map (Range.linear 0 3) ((,) <$> genCredential <*> genValue)
 
 labelName
   :: AnchoredEvent
