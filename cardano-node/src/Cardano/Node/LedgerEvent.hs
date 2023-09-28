@@ -37,8 +37,6 @@ module Cardano.Node.LedgerEvent (
 
     -- * Type-level plumbing
   , ConvertLedgerEvent (..)
-  , ConwayEventsConstraints
-  , ShelleyEventsConstraints
   , eventCodecVersion
 
     -- * Re-Exports
@@ -65,7 +63,6 @@ import           Cardano.Ledger.Binary.Coders (Decode(..), Encode (..), encode, 
 import           Cardano.Ledger.Coin (Coin (..), DeltaCoin (..))
 import           Cardano.Ledger.Credential (Credential (..))
 import           Cardano.Ledger.Rewards (Reward(..))
-import qualified Cardano.Ledger.Shelley.Rules as Rules
 import qualified Cardano.Ledger.Core as Ledger
 import qualified Cardano.Ledger.Address as Ledger
 import           Cardano.Ledger.Core (eraProtVerLow)
@@ -74,6 +71,7 @@ import           Cardano.Ledger.Keys (KeyRole (..))
 import           Cardano.Ledger.Shelley.API (InstantaneousRewards (..), KeyHash (..), ScriptHash (..))
 import           Cardano.Ledger.Shelley.Core (EraCrypto)
 import qualified Cardano.Ledger.Shelley.Rules as Shelley
+import qualified Cardano.Ledger.Alonzo.Rules as Alonzo
 import           Cardano.Ledger.Shelley.Rules (RupdEvent (..),
                      ShelleyEpochEvent (..), ShelleyMirEvent (..),
                      ShelleyNewEpochEvent, ShelleyPoolreapEvent (..),
@@ -114,6 +112,7 @@ import           System.IO(hIsEOF)
 import Cardano.Ledger.Conway.Rules (ConwayNewEpochEvent, ConwayEpochEvent)
 import qualified Cardano.Ledger.Conway.Rules as Conway
 import qualified Cardano.Ledger.Shelley.API as ShelleyAPI
+import Cardano.Ledger.Alonzo.Rules (AlonzoBbodyEvent (ShelleyInAlonzoEvent), AlonzoUtxowEvent (WrappedShelleyEraEvent), AlonzoUtxoEvent (UtxosEvent), AlonzoUtxosEvent)
 
 type LedgerState crypto =
   ExtLedgerState (HardForkBlock (CardanoEras crypto))
@@ -122,12 +121,11 @@ data LedgerEvent crypto
   = LedgerNewEpochEvent !(LedgerNewEpochEvent crypto)
   | LedgerRewardUpdateEvent !(LedgerRewardUpdateEvent crypto)
   -- TODO complete those vvv
-  | LedgerBody
   -- | LedgerUtxoTotalDeposits
   -- | LedgerNewEpoch
   -- | LedgerRegisterPool
   -- | LedgerReRegisterPool
-  | LedgerTick
+  | LedgerBody
   deriving (Eq, Show)
 
 -- TODO: Review encoding & make future-proof (i.e. favor records over lists/tuples)
@@ -141,8 +139,6 @@ instance Crypto crypto => EncCBOR (LedgerEvent crypto) where
         !> To e
     LedgerBody ->
       Sum LedgerBody 2
-    LedgerTick ->
-      Sum LedgerTick 3
 
 instance Crypto crypto => DecCBOR (LedgerEvent crypto) where
   decCBOR = decode (Summands "LedgerEvent" decRaw)
@@ -155,8 +151,6 @@ instance Crypto crypto => DecCBOR (LedgerEvent crypto) where
           <! From
       decRaw 2 =
         SumD LedgerBody
-      decRaw 3 =
-        SumD LedgerTick
       decRaw n = Invalid n
 
 
@@ -334,14 +328,12 @@ toOrdering = \case
   LedgerNewEpochEvent LedgerTotalRewards {}           -> 6
   LedgerNewEpochEvent LedgerTotalAdaPots {}           -> 8
   LedgerBody                                          -> 9
-  LedgerTick                                          -> 10
 
 ledgerEventName :: LedgerEvent crypto -> Text
 ledgerEventName = \case
   LedgerNewEpochEvent e       -> ledgerNewEpochEventName e
   LedgerRewardUpdateEvent e   -> ledgerRewardUpdateEventName e
   LedgerBody {}               -> "LedgerBody"
-  LedgerTick {}               -> "LedgerTick"
 
 ledgerNewEpochEventName :: LedgerNewEpochEvent crypto -> Text
 ledgerNewEpochEventName = \case
@@ -376,20 +368,23 @@ instance All ConvertLedgerEvent xs => ConvertLedgerEvent (HardForkBlock xs) wher
 instance ConvertLedgerEvent ByronBlock where
   toLedgerEvent _ = Nothing
 
-type ShelleyEventsConstraints era =
-  ( Event (Ledger.EraRule "TICK" era) ~ ShelleyTickEvent era
-  , Event (Ledger.EraRule "NEWEPOCH" era) ~ ShelleyNewEpochEvent era
-  , Event (Ledger.EraRule "MIR" era) ~ ShelleyMirEvent era
-  , Event (Ledger.EraRule "EPOCH" era) ~ ShelleyEpochEvent era
-  , Event (Ledger.EraRule "POOLREAP" era) ~ ShelleyPoolreapEvent era
-  , Event (Ledger.EraRule "RUPD" era) ~ RupdEvent (EraCrypto era)
-  , Event (Ledger.EraRule "SNAP" era) ~ Rules.SnapEvent era
-  , Event (Ledger.EraRule "UPEC" era) ~ Void
-  )
-
 toLedgerEventShelley
-  :: forall era proto. ( EraCrypto era ~ StandardCrypto
-     , ShelleyEventsConstraints era
+  :: forall era proto.
+     ( EraCrypto era ~ StandardCrypto
+     , Event (Ledger.EraRule "TICK" era) ~ ShelleyTickEvent era
+     , Event (Ledger.EraRule "NEWEPOCH" era) ~ ShelleyNewEpochEvent era
+     , Event (Ledger.EraRule "MIR" era) ~ ShelleyMirEvent era
+     , Event (Ledger.EraRule "EPOCH" era) ~ ShelleyEpochEvent era
+     , Event (Ledger.EraRule "POOLREAP" era) ~ ShelleyPoolreapEvent era
+     , Event (Ledger.EraRule "RUPD" era) ~ RupdEvent (EraCrypto era)
+     , Event (Ledger.EraRule "SNAP" era) ~ Shelley.SnapEvent era
+     , Event (Ledger.EraRule "BBODY" era) ~ Shelley.ShelleyBbodyEvent era
+     , Event (Ledger.EraRule "LEDGERS" era) ~ Shelley.ShelleyLedgersEvent era
+     , Event (Ledger.EraRule "LEDGER" era) ~ Shelley.ShelleyLedgerEvent era
+     , Event (Ledger.EraRule "UTXOW" era) ~ Shelley.ShelleyUtxowEvent era
+     , Event (Ledger.EraRule "UTXO" era) ~ Shelley.UtxoEvent era
+     , Event (Ledger.EraRule "PPUP" era) ~ Shelley.PpupEvent era
+     , Event (Ledger.EraRule "DELEGS" era) ~ Shelley.ShelleyDelegsEvent era
      )
   => WrapLedgerEvent (ShelleyBlock proto era)
   -> Maybe (LedgerEvent (EraCrypto era))
@@ -439,46 +434,222 @@ toLedgerEventShelley evt =
         TickRupdEvent (RupdEvent epoch rewards) ->
           liftRewardUpdate $ LedgerIncrementalRewards epoch rewards
 
-    ShelleyLedgerEventBBODY _ ->
+    ShelleyLedgerEventBBODY (Shelley.LedgersEvent (Shelley.LedgerEvent (Shelley.UtxowEvent (Shelley.UtxoEvent (Shelley.TotalDeposits _txBodyHash _coin))))) ->
+      Just LedgerBody
+
+    ShelleyLedgerEventBBODY (Shelley.LedgersEvent (Shelley.LedgerEvent (Shelley.UtxowEvent (Shelley.UtxoEvent (Shelley.UpdateEvent (Shelley.NewEpoch _epochNo)))))) ->
+      Just LedgerBody
+
+    ShelleyLedgerEventBBODY (Shelley.LedgersEvent (Shelley.LedgerEvent (Shelley.DelegsEvent (Shelley.DelplEvent _)))) ->
+      -- TODO Constructors of ShelleyDelplEvent (PoolEvent and DelegEvent) not exposed by
+      -- cardano-ledger.
       Just LedgerBody
  where
   liftNewEpoch = Just . LedgerNewEpochEvent
   liftRewardUpdate = Just . LedgerRewardUpdateEvent
 
-type ConwayEventsConstraints era =
-  ( Event (Ledger.EraRule "TICK" era) ~ ShelleyTickEvent era
-  , Event (Ledger.EraRule "NEWEPOCH" era) ~ ConwayNewEpochEvent era
-  , Event (Ledger.EraRule "MIR" era) ~ ShelleyMirEvent era
-  , Event (Ledger.EraRule "EPOCH" era) ~ ConwayEpochEvent era
-  , Event (Ledger.EraRule "POOLREAP" era) ~ ShelleyPoolreapEvent era
-  , Event (Ledger.EraRule "RUPD" era) ~ RupdEvent (EraCrypto era)
-  , Event (Ledger.EraRule "SNAP" era) ~ Rules.SnapEvent era
-  )
+toAllegraEventShelley
+  :: forall era proto.
+     ( EraCrypto era ~ StandardCrypto
+     , Event (Ledger.EraRule "TICK" era) ~ ShelleyTickEvent era
+     , Event (Ledger.EraRule "NEWEPOCH" era) ~ ShelleyNewEpochEvent era
+     , Event (Ledger.EraRule "MIR" era) ~ ShelleyMirEvent era
+     , Event (Ledger.EraRule "EPOCH" era) ~ ShelleyEpochEvent era
+     , Event (Ledger.EraRule "POOLREAP" era) ~ ShelleyPoolreapEvent era
+     , Event (Ledger.EraRule "RUPD" era) ~ RupdEvent (EraCrypto era)
+     , Event (Ledger.EraRule "SNAP" era) ~ Shelley.SnapEvent era
+     , Event (Ledger.EraRule "BBODY" era) ~ Shelley.ShelleyBbodyEvent era
+     , Event (Ledger.EraRule "LEDGERS" era) ~ Shelley.ShelleyLedgersEvent era
+     , Event (Ledger.EraRule "LEDGER" era) ~ Shelley.ShelleyLedgerEvent era
+     , Event (Ledger.EraRule "UTXOW" era) ~ Shelley.ShelleyUtxowEvent era
+     -- , Event (Ledger.EraRule "UTXO" era) ~ Allegra.AllegraUtxoEvent era -- TODO Not exported
+     -- , Event (Ledger.EraRule "PPUP" era) ~ Shelley.PpupEvent era
+     , Event (Ledger.EraRule "DELEGS" era) ~ Shelley.ShelleyDelegsEvent era
+     )
+  => WrapLedgerEvent (ShelleyBlock proto era)
+  -> Maybe (LedgerEvent (EraCrypto era))
+toAllegraEventShelley evt =
+  case unwrapLedgerEvent evt of
+    ShelleyLedgerEventTICK tickEvent ->
+      case tickEvent of
+        TickNewEpochEvent newEpochEvent ->
+          case newEpochEvent of
+            Shelley.TotalRewardEvent epoch rewards ->
+              liftNewEpoch $ LedgerTotalRewards epoch rewards
+
+            Shelley.RestrainedRewards epoch rewards credentials ->
+              liftNewEpoch $ LedgerRestrainedRewards epoch rewards credentials
+
+            Shelley.MirEvent transfer ->
+              case transfer of
+                MirTransfer (InstantaneousRewards fromReserve fromTreasury deltaReserve deltaTreasury) ->
+                  liftNewEpoch $ LedgerMirDist fromReserve fromTreasury deltaReserve deltaTreasury
+                NoMirTransfer{} -> -- FIXME: create an event for this
+                  Nothing
+
+            Shelley.EpochEvent (Shelley.PoolReapEvent (RetiredPools refunded unclaimed epoch)) ->
+               liftNewEpoch $ LedgerPoolReaping epoch refunded unclaimed
+
+            Shelley.EpochEvent (Shelley.SnapEvent (Shelley.StakeDistEvent stakeDist)) ->
+              liftNewEpoch $ LedgerStakeDistEvent stakeDist
+
+            Shelley.EpochEvent (Shelley.UpecEvent _) ->
+              -- There isn't any data associated with UpecEvent: Event (EraRule "UPEC" era) ~ Void
+              Nothing
+
+            Shelley.TotalAdaPotsEvent adaPots ->
+              liftNewEpoch $ LedgerTotalAdaPots
+                (ShelleyAPI.treasuryAdaPot adaPots)
+                (ShelleyAPI.reservesAdaPot adaPots)
+                (ShelleyAPI.rewardsAdaPot adaPots)
+                (ShelleyAPI.utxoAdaPot adaPots)
+                (ShelleyAPI.keyDepositAdaPot adaPots)
+                (ShelleyAPI.poolDepositAdaPot adaPots)
+                (ShelleyAPI.depositsAdaPot adaPots)
+                (ShelleyAPI.feesAdaPot adaPots)
+
+            Shelley.DeltaRewardEvent (RupdEvent epoch rewards) ->
+              liftRewardUpdate $ LedgerIncrementalRewards epoch rewards
+
+        TickRupdEvent (RupdEvent epoch rewards) ->
+          liftRewardUpdate $ LedgerIncrementalRewards epoch rewards
+
+    -- TODO Constructors not exported by current cardano-ledger version
+    ShelleyLedgerEventBBODY (Shelley.LedgersEvent (Shelley.LedgerEvent (Shelley.UtxowEvent (Shelley.UtxoEvent _)))) ->
+      Just LedgerBody
+
+    ShelleyLedgerEventBBODY (Shelley.LedgersEvent (Shelley.LedgerEvent (Shelley.DelegsEvent (Shelley.DelplEvent _)))) ->
+      -- TODO Constructors of ShelleyDelplEvent (PoolEvent and DelegEvent) not exposed by
+      -- cardano-ledger.
+      Just LedgerBody
+ where
+  liftNewEpoch = Just . LedgerNewEpochEvent
+  liftRewardUpdate = Just . LedgerRewardUpdateEvent
+
+toAlonzoEventShelley
+  :: forall era proto.
+     ( EraCrypto era ~ StandardCrypto
+     , Event (Ledger.EraRule "TICK" era) ~ ShelleyTickEvent era
+     , Event (Ledger.EraRule "NEWEPOCH" era) ~ ShelleyNewEpochEvent era
+     , Event (Ledger.EraRule "MIR" era) ~ ShelleyMirEvent era
+     , Event (Ledger.EraRule "EPOCH" era) ~ ShelleyEpochEvent era
+     , Event (Ledger.EraRule "POOLREAP" era) ~ ShelleyPoolreapEvent era
+     , Event (Ledger.EraRule "RUPD" era) ~ RupdEvent (EraCrypto era)
+     , Event (Ledger.EraRule "SNAP" era) ~ Shelley.SnapEvent era
+     , Event (Ledger.EraRule "BBODY" era) ~ AlonzoBbodyEvent era
+     , Event (Ledger.EraRule "LEDGERS" era) ~ Shelley.ShelleyLedgersEvent era
+     , Event (Ledger.EraRule "LEDGER" era) ~ Shelley.ShelleyLedgerEvent era
+     , Event (Ledger.EraRule "UTXOW" era) ~ AlonzoUtxowEvent era
+     , Event (Ledger.EraRule "UTXOS" era) ~ AlonzoUtxosEvent era
+     , Event (Ledger.EraRule "UTXO" era) ~ AlonzoUtxoEvent era
+     , Event (Ledger.EraRule "PPUP" era) ~ Shelley.PpupEvent era
+     , Event (Ledger.EraRule "DELEGS" era) ~ Shelley.ShelleyDelegsEvent era
+     )
+  => WrapLedgerEvent (ShelleyBlock proto era)
+  -> Maybe (LedgerEvent (EraCrypto era))
+toAlonzoEventShelley evt =
+  case unwrapLedgerEvent evt of
+    ShelleyLedgerEventTICK tickEvent ->
+      case tickEvent of
+        TickNewEpochEvent newEpochEvent ->
+          case newEpochEvent of
+            Shelley.TotalRewardEvent epoch rewards ->
+              liftNewEpoch $ LedgerTotalRewards epoch rewards
+
+            Shelley.RestrainedRewards epoch rewards credentials ->
+              liftNewEpoch $ LedgerRestrainedRewards epoch rewards credentials
+
+            Shelley.MirEvent transfer ->
+              case transfer of
+                MirTransfer (InstantaneousRewards fromReserve fromTreasury deltaReserve deltaTreasury) ->
+                  liftNewEpoch $ LedgerMirDist fromReserve fromTreasury deltaReserve deltaTreasury
+                NoMirTransfer{} -> -- FIXME: create an event for this
+                  Nothing
+
+            Shelley.EpochEvent (Shelley.PoolReapEvent (RetiredPools refunded unclaimed epoch)) ->
+               liftNewEpoch $ LedgerPoolReaping epoch refunded unclaimed
+
+            Shelley.EpochEvent (Shelley.SnapEvent (Shelley.StakeDistEvent stakeDist)) ->
+              liftNewEpoch $ LedgerStakeDistEvent stakeDist
+
+            Shelley.EpochEvent (Shelley.UpecEvent _) ->
+              -- There isn't any data associated with UpecEvent: Event (EraRule "UPEC" era) ~ Void
+              Nothing
+
+            Shelley.TotalAdaPotsEvent adaPots ->
+              liftNewEpoch $ LedgerTotalAdaPots
+                (ShelleyAPI.treasuryAdaPot adaPots)
+                (ShelleyAPI.reservesAdaPot adaPots)
+                (ShelleyAPI.rewardsAdaPot adaPots)
+                (ShelleyAPI.utxoAdaPot adaPots)
+                (ShelleyAPI.keyDepositAdaPot adaPots)
+                (ShelleyAPI.poolDepositAdaPot adaPots)
+                (ShelleyAPI.depositsAdaPot adaPots)
+                (ShelleyAPI.feesAdaPot adaPots)
+
+            Shelley.DeltaRewardEvent (RupdEvent epoch rewards) ->
+              liftRewardUpdate $ LedgerIncrementalRewards epoch rewards
+
+        TickRupdEvent (RupdEvent epoch rewards) ->
+          liftRewardUpdate $ LedgerIncrementalRewards epoch rewards
+
+    ShelleyLedgerEventBBODY (ShelleyInAlonzoEvent (Shelley.LedgersEvent (Shelley.LedgerEvent (Shelley.UtxowEvent (WrappedShelleyEraEvent (Shelley.UtxoEvent (UtxosEvent (Alonzo.AlonzoPpupToUtxosEvent (Shelley.NewEpoch _epochNo))))))))) ->
+      Just LedgerBody
+    ShelleyLedgerEventBBODY (ShelleyInAlonzoEvent (Shelley.LedgersEvent (Shelley.LedgerEvent (Shelley.UtxowEvent (WrappedShelleyEraEvent (Shelley.UtxoEvent (UtxosEvent (Alonzo.SuccessfulPlutusScriptsEvent _plutusDebugList)))))))) ->
+      Just LedgerBody
+    ShelleyLedgerEventBBODY (ShelleyInAlonzoEvent (Shelley.LedgersEvent (Shelley.LedgerEvent (Shelley.UtxowEvent (WrappedShelleyEraEvent (Shelley.UtxoEvent (UtxosEvent (Alonzo.FailedPlutusScriptsEvent _plutusDebugList)))))))) ->
+      Just LedgerBody
+    -- TODO Constructor of AlonzoUtxosEvent (TotalDeposits) is not exposed yet by cardano-ledger.
+    -- ShelleyLedgerEventBBODY (ShelleyInAlonzoEvent (Shelley.LedgersEvent (Shelley.LedgerEvent (Shelley.UtxowEvent (WrappedShelleyEraEvent (Shelley.UtxoEvent (UtxosEvent (Alonzo.TotalDeposits _txBodyHash _coin)))))))) ->
+    --   Just LedgerBody
+
+    ShelleyLedgerEventBBODY (ShelleyInAlonzoEvent (Shelley.LedgersEvent (Shelley.LedgerEvent (Shelley.DelegsEvent (Shelley.DelplEvent _))))) ->
+      -- TODO Constructors of ShelleyDelplEvent (PoolEvent and DelegEvent) not exposed by
+      -- cardano-ledger.
+      Just LedgerBody
+ where
+  liftNewEpoch = Just . LedgerNewEpochEvent
+  liftRewardUpdate = Just . LedgerRewardUpdateEvent
+
 toConwayEventShelley
-  :: forall era proto. ( EraCrypto era ~ StandardCrypto
-     , ConwayEventsConstraints era
+  :: forall era proto.
+     ( EraCrypto era ~ StandardCrypto
+     , Event (Ledger.EraRule "TICK" era) ~ ShelleyTickEvent era
+     , Event (Ledger.EraRule "NEWEPOCH" era) ~ ConwayNewEpochEvent era
+     , Event (Ledger.EraRule "EPOCH" era) ~ ConwayEpochEvent era
+     , Event (Ledger.EraRule "POOLREAP" era) ~ ShelleyPoolreapEvent era
+     , Event (Ledger.EraRule "RUPD" era) ~ RupdEvent (EraCrypto era)
+     , Event (Ledger.EraRule "SNAP" era) ~ Shelley.SnapEvent era
+     , Event (Ledger.EraRule "BBODY" era) ~ AlonzoBbodyEvent era
+     , Event (Ledger.EraRule "LEDGERS" era) ~ Shelley.ShelleyLedgersEvent era
+     , Event (Ledger.EraRule "LEDGER" era) ~ Conway.ConwayLedgerEvent era
+     , Event (Ledger.EraRule "UTXOW" era) ~ AlonzoUtxowEvent era
+     , Event (Ledger.EraRule "UTXO" era) ~ AlonzoUtxoEvent era
+     , Event (Ledger.EraRule "UTXOS" era) ~ AlonzoUtxosEvent era
+     -- , Event (Ledger.EraRule "PPUP" era) ~ Shelley.PpupEvent era
+     -- , Event (Ledger.EraRule "DELEGS" era) ~ Conway.ConwayDelegsEvent era
+     , Event (Ledger.EraRule "TALLY" era) ~ ()
      )
   => WrapLedgerEvent (ShelleyBlock proto era)
   -> Maybe (LedgerEvent (EraCrypto era))
 toConwayEventShelley evt =
   case unwrapLedgerEvent evt of
     ShelleyLedgerEventTICK (TickNewEpochEvent (Conway.TotalRewardEvent epoch rewards)) ->
-      Just $ LedgerNewEpochEvent $ LedgerTotalRewards epoch rewards
+      liftNewEpoch $ LedgerTotalRewards epoch rewards
     ShelleyLedgerEventTICK (TickNewEpochEvent (Conway.RestrainedRewards epoch rewards credentials)) ->
-      Just $ LedgerNewEpochEvent $ LedgerRestrainedRewards epoch rewards credentials
+      liftNewEpoch  $ LedgerRestrainedRewards epoch rewards credentials
     ShelleyLedgerEventTICK (TickNewEpochEvent (Conway.DeltaRewardEvent (RupdEvent epoch rewards))) ->
-      Just $ LedgerRewardUpdateEvent $ LedgerIncrementalRewards epoch rewards
+      liftRewardUpdate $ LedgerIncrementalRewards epoch rewards
     ShelleyLedgerEventTICK (TickNewEpochEvent (Conway.DeltaRewardEvent _)) ->
       Nothing -- Or else getting "Pattern not exhaustif" warning, but can't seem to find the missing constructor.
     ShelleyLedgerEventTICK (TickNewEpochEvent (Conway.EpochEvent (Conway.PoolReapEvent (RetiredPools refunded unclaimed epoch)))) ->
-       Just $ LedgerNewEpochEvent $ LedgerPoolReaping epoch refunded unclaimed
+      liftNewEpoch $ LedgerPoolReaping epoch refunded unclaimed
     ShelleyLedgerEventTICK (TickNewEpochEvent (Conway.EpochEvent (Conway.SnapEvent (Shelley.StakeDistEvent stakeDist)))) ->
-      Just $ LedgerNewEpochEvent $ LedgerStakeDistEvent stakeDist
+      liftNewEpoch $ LedgerStakeDistEvent stakeDist
     ShelleyLedgerEventTICK (TickNewEpochEvent (Conway.EpochEvent _)) ->
       Nothing -- Or else getting "Pattern not exhaustif" warning, but can't seem to find the missing constructor.
     ShelleyLedgerEventTICK (TickNewEpochEvent (Conway.TotalAdaPotsEvent adaPots)) ->
-      Just
-        $ LedgerNewEpochEvent
+      liftNewEpoch
         $ LedgerTotalAdaPots
             (ShelleyAPI.treasuryAdaPot adaPots)
             (ShelleyAPI.reservesAdaPot adaPots)
@@ -489,24 +660,38 @@ toConwayEventShelley evt =
             (ShelleyAPI.depositsAdaPot adaPots)
             (ShelleyAPI.feesAdaPot adaPots)
     ShelleyLedgerEventTICK (TickRupdEvent (RupdEvent epoch rewards)) ->
-      Just $ LedgerRewardUpdateEvent $ LedgerIncrementalRewards epoch rewards
-    ShelleyLedgerEventBBODY _ ->
+      liftRewardUpdate $ LedgerIncrementalRewards epoch rewards
+
+    ShelleyLedgerEventBBODY (ShelleyInAlonzoEvent (Shelley.LedgersEvent (Shelley.LedgerEvent (Conway.UtxowEvent (WrappedShelleyEraEvent (Shelley.UtxoEvent (UtxosEvent (Alonzo.AlonzoPpupToUtxosEvent _)))))))) ->
+      -- TODO Constructor missing from current cardano-ledger version
+      Just LedgerBody
+    ShelleyLedgerEventBBODY (ShelleyInAlonzoEvent (Shelley.LedgersEvent (Shelley.LedgerEvent (Conway.UtxowEvent (WrappedShelleyEraEvent (Shelley.UtxoEvent (UtxosEvent (Alonzo.SuccessfulPlutusScriptsEvent _plutusDebugList)))))))) ->
+      Just LedgerBody
+    ShelleyLedgerEventBBODY (ShelleyInAlonzoEvent (Shelley.LedgersEvent (Shelley.LedgerEvent (Conway.UtxowEvent (WrappedShelleyEraEvent (Shelley.UtxoEvent (UtxosEvent (Alonzo.FailedPlutusScriptsEvent _plutusDebugList)))))))) ->
+      Just LedgerBody
+    ShelleyLedgerEventBBODY (ShelleyInAlonzoEvent (Shelley.LedgersEvent (Shelley.LedgerEvent (Conway.TallyEvent ())))) ->
       Nothing
+    ShelleyLedgerEventBBODY (ShelleyInAlonzoEvent (Shelley.LedgersEvent (Shelley.LedgerEvent (Conway.DelegsEvent _)))) ->
+      -- TODO Constructors of ShelleyDelplEvent (PoolEvent and DelegEvent) not exposed by cardano-ledger.
+      Just LedgerBody
+ where
+  liftNewEpoch = Just . LedgerNewEpochEvent
+  liftRewardUpdate = Just . LedgerRewardUpdateEvent
 
 instance ConvertLedgerEvent (ShelleyBlock proto (ShelleyEra StandardCrypto)) where
   toLedgerEvent = toLedgerEventShelley
 
-instance ConvertLedgerEvent (ShelleyBlock proto (MaryEra StandardCrypto)) where
-  toLedgerEvent = toLedgerEventShelley
-
 instance ConvertLedgerEvent (ShelleyBlock proto (AllegraEra StandardCrypto)) where
-  toLedgerEvent = toLedgerEventShelley
+  toLedgerEvent = toAllegraEventShelley
+
+instance ConvertLedgerEvent (ShelleyBlock proto (MaryEra StandardCrypto)) where
+  toLedgerEvent = toAllegraEventShelley
 
 instance ConvertLedgerEvent (ShelleyBlock proto (AlonzoEra StandardCrypto)) where
-  toLedgerEvent = toLedgerEventShelley
+  toLedgerEvent = toAlonzoEventShelley
 
 instance ConvertLedgerEvent (ShelleyBlock proto (BabbageEra StandardCrypto)) where
-  toLedgerEvent = toLedgerEventShelley
+  toLedgerEvent = toAlonzoEventShelley
 
 instance ConvertLedgerEvent (ShelleyBlock proto (ConwayEra StandardCrypto)) where
   toLedgerEvent = toConwayEventShelley
