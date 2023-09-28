@@ -64,7 +64,7 @@ rustBuildHook
   -> BuildFlags
   -> IO ()
 rustBuildHook description localBuildInfo hooks flags = do
-  putStrLn "[🦀] Compiling Rust dependencies..."
-  putStrLn "[🦀] cargo build --release"
+  putStrLn "🦀 Compiling Rust dependencies..."
+  putStrLn "🦀 cargo build --release"
   rawSystemExit (fromFlag $ buildVerbosity flags) "cargo" ["build", "--release"]
   buildHook simpleUserHooks description localBuildInfo hooks flags
