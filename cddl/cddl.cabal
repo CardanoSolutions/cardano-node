@@ -49,16 +49,10 @@ test-suite unit
   hs-source-dirs:       test
   main-is:              Spec.hs
   other-modules:        Codec.CBOR.SchemaSpec
-                        Cardano.Node.LedgerEventSpec
                         Paths_cddl
   build-depends:        , base
                         , base16-bytestring
-                        , bytestring
-                        , cardano-crypto-class
                         , cddl
-                        , containers
-                        , hedgehog
                         , hspec
                         , text
-                        , cardano-node
   build-tool-depends:   hspec-discover:hspec-discover

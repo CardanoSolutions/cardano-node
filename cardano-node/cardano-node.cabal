@@ -257,6 +257,8 @@ test-suite cardano-node-test
                       , cardano-ledger-core
                       , cardano-node
                       , cardano-slotting
+                      , cddl
+                      , containers
                       , directory
                       , filepath
                       , hedgehog
