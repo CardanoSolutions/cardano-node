@@ -30,7 +30,6 @@ jobs:
         nix_path: nixpkgs=channel:nixos-unstable
 
     - name: Prepare cache
-      working-directory: server
       run: |
         nix develop github:input-output-hk/devx#${{ matrix.compiler }}-static-minimal-iog --no-write-lock-file --refresh --command bash -c "cabal update && cabal freeze"
 
@@ -40,12 +39,11 @@ jobs:
         path: |
           ~/.cabal-static/packages
           ~/.cabal-static/store
-          server/dist-newstyle
-        key: cabal-cache-${{ runner.os }}-${{ matrix.arch }}-${{ matrix.compiler }}-${{ hashFiles('server/cabal.project.freeze') }}
+          dist-newstyle
+        key: cabal-cache-${{ runner.os }}-${{ matrix.arch }}-${{ matrix.compiler }}-${{ hashFiles('cabal.project.freeze') }}
         restore-keys: |
           cabal-cache-${{ runner.os }}-${{ matrix.arch }}-${{ matrix.compiler }}
 
     - name: 🔨 Build
-      working-directory: server
       run: |
         nix develop github:input-output-hk/devx#${{ matrix.compiler }}-static-minimal-iog --no-write-lock-file --refresh --command bash -c "cabal build cardano-node:exe:cardano-node"
