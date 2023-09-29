@@ -29,6 +29,10 @@ jobs:
           substituters = https://cache.nixos.org/ https://cache.iog.io/ https://cache.zw3rk.com/
         nix_path: nixpkgs=channel:nixos-unstable
 
+    - name: Install extra system dependencies
+      run: |
+        sudo apt-get -y install libsystemd-dev
+
     - name: Prepare cache
       run: |
         nix develop github:input-output-hk/devx#${{ matrix.compiler }}-static-minimal-iog --no-write-lock-file --refresh --command bash -c "cabal update && cabal freeze"
