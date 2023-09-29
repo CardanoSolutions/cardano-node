@@ -179,7 +179,7 @@ runNode cmdPc = do
           handleNodeWithTracers
             ledgerEventHandler
             cmdPc nc p networkMagic runP
-      (SomeConsensusProtocol _ runP, _) ->
+      (SomeConsensusProtocol _ runP, _noGivenPort) ->
         handleNodeWithTracers
           discardEvent
           cmdPc nc p networkMagic runP
