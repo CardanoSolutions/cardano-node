@@ -113,6 +113,7 @@ import Cardano.Ledger.Conway.Rules (ConwayNewEpochEvent, ConwayEpochEvent)
 import qualified Cardano.Ledger.Conway.Rules as Conway
 import qualified Cardano.Ledger.Shelley.API as ShelleyAPI
 import Cardano.Ledger.Alonzo.Rules (AlonzoBbodyEvent (ShelleyInAlonzoEvent), AlonzoUtxowEvent (WrappedShelleyEraEvent), AlonzoUtxoEvent (UtxosEvent), AlonzoUtxosEvent)
+import GHC.IO.Exception (IOException(IOError, ioe_type), IOErrorType (ResourceVanished))
 
 type LedgerState crypto =
   ExtLedgerState (HardForkBlock (CardanoEras crypto))
@@ -813,4 +814,10 @@ withLedgerEventsServerStream port handler = do
       Nothing -> pure ()
       Just e -> do
         let anchoredEvent = AnchoredEvent (getOneEraHash headerHash) slotNo e
-        BS.hPut h $ serializeAnchoredEvent (eventCodecVersion event) anchoredEvent
+        catch (BS.hPut h $ serializeAnchoredEvent (eventCodecVersion event) anchoredEvent) $ \case
+          -- If the client closes the socket, we continue running the node, but ignore the events.
+          IOError { ioe_type = ResourceVanished } -> do
+            pure ()
+          err -> do
+            print err
+            throwIO err
