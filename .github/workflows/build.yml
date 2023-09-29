@@ -3,7 +3,7 @@ name: Continuous Integration
 on:
   workflow_dispatch:
   push:
-    branches: [ master ]
+    branches: [ master, release/* ]
 
 jobs:
   build:
