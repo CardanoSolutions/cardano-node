@@ -1,0 +1,51 @@
+name: Continuous Integration
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ master ]
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ linux ]
+        arch: [ x86_64 ]
+        compiler: [ ghc8107 ]
+
+    runs-on: ${{ matrix.os == 'linux' && 'ubuntu-latest' }}
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+      with:
+        submodules: true
+
+    - name: Install Nix with good defaults
+      uses: cachix/install-nix-action@v22
+      with:
+        extra_nix_config: |
+          trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ= loony-tools:pr9m4BkM/5/eSTZlkQyRt57Jz7OMBxNSUiMC4FkcNfk= cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=
+          substituters = https://cache.nixos.org/ https://cache.iog.io/ https://cache.zw3rk.com/
+        nix_path: nixpkgs=channel:nixos-unstable
+
+    - name: Prepare cache
+      working-directory: server
+      run: |
+        nix develop github:input-output-hk/devx#${{ matrix.compiler }}-static-minimal-iog --no-write-lock-file --refresh --command bash -c "cabal update && cabal freeze"
+
+    - name: Cache
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cabal-static/packages
+          ~/.cabal-static/store
+          server/dist-newstyle
+        key: cabal-cache-${{ runner.os }}-${{ matrix.arch }}-${{ matrix.compiler }}-${{ hashFiles('server/cabal.project.freeze') }}
+        restore-keys: |
+          cabal-cache-${{ runner.os }}-${{ matrix.arch }}-${{ matrix.compiler }}
+
+    - name: 🔨 Build
+      working-directory: server
+      run: |
+        nix develop github:input-output-hk/devx#${{ matrix.compiler }}-static-minimal-iog --no-write-lock-file --refresh --command bash -c "cabal build cardano-node:exe:cardano-node"
