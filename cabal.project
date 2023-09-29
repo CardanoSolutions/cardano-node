@@ -24,12 +24,6 @@ packages:
     trace-resources
     trace-forward
 
-    -- Added as local git sub-modules since they're also needed for this patched node version.
-    ouroboros-consensus/ouroboros-consensus
-    ouroboros-consensus/ouroboros-consensus-cardano
-    ouroboros-consensus/ouroboros-consensus-protocol
-    ouroboros-consensus/ouroboros-consensus-diffusion
-
 package cardano-api
   ghc-options: -Werror
 
@@ -80,3 +74,19 @@ constraints:
 -- Do NOT add more source-repository-package stanzas here unless they are strictly
 -- temporary! Please read the section in CONTRIBUTING about updating dependencies.
 --- 811-freeze	1969-12-31 19:00:01.000000000 -0500
+
+-- We need a forked version of ouroboros-consensus to support ledger
+-- events extraction from the application of blocks
+--
+-- To compute sha256 field:
+-- $ nix-prefetch-git https://github.com/CardanoSolutions/ouroboros-consensus XXXX
+source-repository-package
+    type: git
+    location: https://github.com/CardanoSolutions/ouroboros-consensus
+    tag: 26cfb9666efd78692912fbdcc41e927f64f282ae
+    --sha256: 0p4axag77by7bwc3wnbdphpc6ib57b0di4clzcb8c0za0gf1sw46
+    subdir:
+      ouroboros-consensus
+      ouroboros-consensus-cardano
+      ouroboros-consensus-protocol
+      ouroboros-consensus-diffusion
