@@ -16,6 +16,8 @@ There's therefore no intention whatsoever to change anything regarding the seman
 
 We introduce a new (optional) command-line option `--ledger-event-handler TCP/PORT` to the `run` command of the node. If provided, the cardano-node will open a TCP socket on the given port and await for a client connection. From there, any event emitted by the ledger will be pushed through that socket as a serialized CBOR object, anchored in a block header hash and a slot. Those [ledger events](https://github.com/input-output-hk/cardano-ledger/blob/master/docs/LedgerEvents.md) are currently produced by the cardano-node but discarded by the consensus layer in the original implementation.
 
+The [CIP-0078](https://github.com/cardano-foundation/CIPs/pull/375) proposes to extend the `LocalChainSync` to optionally include those events and this repository is a prototype towards that goal: It exposes the ledger events, without storing them, and without modifying the existing mini-protocols in order for the changes to be minimally invasive.
+
 Anchored events abides by the following CDDL schema:
 
 ```cddl
