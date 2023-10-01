@@ -362,7 +362,7 @@ class ConvertLedgerEvent blk where
 instance All ConvertLedgerEvent xs => ConvertLedgerEvent (HardForkBlock xs) where
   toLedgerEvent =
     hcollapse
-      . hcmap (Proxy @ ConvertLedgerEvent) (K . toLedgerEvent)
+      . hcmap (Proxy @ConvertLedgerEvent) (K . toLedgerEvent)
       . getOneEraLedgerEvent
       . unwrapLedgerEvent
 
