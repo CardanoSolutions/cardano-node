@@ -31,10 +31,6 @@ module Cardano.Node.LedgerEvent (
   , withLedgerEventsServerStream
   , foldEvent
 
-    -- ** Example
-  , filterRewards
-  , parseStakeCredential
-
     -- * Type-level plumbing
   , ConvertLedgerEvent (..)
   , eventCodecVersion
@@ -49,6 +45,7 @@ module Cardano.Node.LedgerEvent (
   , Reward (..)
   , ScriptHash (..)
   , SlotNo (..)
+  , BlockNo (..)
   , StandardCrypto
   , serialize'
   ) where
@@ -64,7 +61,6 @@ import           Cardano.Ledger.Coin (Coin (..), DeltaCoin (..))
 import           Cardano.Ledger.Credential (Credential (..))
 import           Cardano.Ledger.Rewards (Reward(..))
 import qualified Cardano.Ledger.Core as Ledger
-import qualified Cardano.Ledger.Address as Ledger
 import           Cardano.Ledger.Core (eraProtVerLow)
 import           Cardano.Ledger.Crypto (Crypto, StandardCrypto)
 import           Cardano.Ledger.Keys (KeyRole (..))
@@ -76,14 +72,14 @@ import           Cardano.Ledger.Shelley.Rules (RupdEvent (..),
                      ShelleyEpochEvent (..), ShelleyMirEvent (..),
                      ShelleyNewEpochEvent, ShelleyPoolreapEvent (..),
                      ShelleyTickEvent (..))
-import           Cardano.Slotting.Slot (SlotNo (..), EpochNo (..))
+import           Cardano.Slotting.Slot (SlotNo (..), EpochNo (..), WithOrigin (..))
+import           Cardano.Slotting.Block (BlockNo(..))
 import qualified Codec.CBOR.Decoding as CBOR
 import qualified Codec.CBOR.Encoding as CBOR
 import qualified Codec.CBOR.Read as CBOR
 import qualified Codec.CBOR.Write as CBOR
 import           Control.State.Transition (Event)
 import           Data.ByteString.Short(ShortByteString)
-import qualified Data.ByteString.Char8 as B8
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.ByteString  as BS
 import qualified Data.ByteString.Base16 as Hex
@@ -114,6 +110,7 @@ import qualified Cardano.Ledger.Conway.Rules as Conway
 import qualified Cardano.Ledger.Shelley.API as ShelleyAPI
 import Cardano.Ledger.Alonzo.Rules (AlonzoBbodyEvent (ShelleyInAlonzoEvent), AlonzoUtxowEvent (WrappedShelleyEraEvent), AlonzoUtxoEvent (UtxosEvent), AlonzoUtxosEvent)
 import GHC.IO.Exception (IOException(IOError, ioe_type), IOErrorType (ResourceVanished))
+import Ouroboros.Network.Block (ChainHash(GenesisHash, BlockHash))
 
 type LedgerState crypto =
   ExtLedgerState (HardForkBlock (CardanoEras crypto))
@@ -307,13 +304,6 @@ instance Crypto crypto => DecCBOR (LedgerRewardUpdateEvent crypto) where
         <! From
       decRaw n =
         Invalid n
-
--- | Parse a 'Credential 'Staking' from a stake address in base16.
-parseStakeCredential :: String -> Maybe (Credential 'Staking StandardCrypto)
-parseStakeCredential str =
-   case Hex.decode (B8.pack str) of
-     Right bytes -> Ledger.getRwdCred <$> Ledger.decodeRewardAcnt bytes
-     Left{} -> Nothing
 
 instance Ord (LedgerEvent crypto) where
   a <= b = toOrdering a <= toOrdering b
@@ -711,22 +701,28 @@ eventCodecVersion = \case
 
 data AnchoredEvent =
   AnchoredEvent
-    { headerHash :: !ShortByteString
+    { prevBlockHeaderHash :: !(WithOrigin ShortByteString)
+    , blockHeaderHash :: !ShortByteString
     , slotNo :: !SlotNo
+    , blockNo :: !BlockNo
     , ledgerEvent :: !(LedgerEvent StandardCrypto)
     }
   deriving (Eq, Show)
 
 instance EncCBOR AnchoredEvent where
-  encCBOR AnchoredEvent{headerHash, slotNo, ledgerEvent} =
+  encCBOR AnchoredEvent{prevBlockHeaderHash, blockHeaderHash , slotNo, blockNo, ledgerEvent} =
     encode $ Rec AnchoredEvent
-      !> To headerHash
+      !> To prevBlockHeaderHash
+      !> To blockHeaderHash
       !> To slotNo
+      !> To blockNo
       !> To ledgerEvent
 
 instance DecCBOR AnchoredEvent where
   decCBOR =
     decode $ RecD AnchoredEvent
+      <! From
+      <! From
       <! From
       <! From
       <! From
@@ -773,23 +769,9 @@ foldEvent h st0 fn =
         st' <- fn st event
         go st' events
 
-filterRewards
-  :: Credential 'Staking StandardCrypto
-  -> Map EpochNo Coin
-  -> AnchoredEvent
-  -> Map EpochNo Coin
-filterRewards credential st = \case
-  AnchoredEvent{ledgerEvent = LedgerNewEpochEvent (LedgerTotalRewards epoch rewardsMap)} ->
-    let update = Map.lookup credential rewardsMap
-          & maybe identity (Map.insert epoch . mergeRewards)
-     in update st
-  _otherEvent -> st
- where
-   mergeRewards = Set.foldr (<>) mempty . Set.map Ledger.rewardAmount
-
 withLedgerEventsServerStream
   :: PortNumber
-  -> (LedgerEventHandler IO (LedgerState StandardCrypto) -> IO ())
+  -> (LedgerEventHandler IO (LedgerState StandardCrypto) (HardForkBlock (CardanoEras crypto)) -> IO ())
   -> IO ()
 withLedgerEventsServerStream port handler = do
   withSocketsDo $ do
@@ -809,15 +791,18 @@ withLedgerEventsServerStream port handler = do
 
   closeSockets = close
 
-  writeLedgerEvents h headerHash slotNo event = do
-    case fromAuxLedgerEvent event of
-      Nothing -> pure ()
-      Just e -> do
-        let anchoredEvent = AnchoredEvent (getOneEraHash headerHash) slotNo e
-        catch (BS.hPut h $ serializeAnchoredEvent (eventCodecVersion event) anchoredEvent) $ \case
-          -- If the client closes the socket, we continue running the node, but ignore the events.
-          IOError { ioe_type = ResourceVanished } -> do
-            pure ()
-          err -> do
-            print err
-            throwIO err
+  writeLedgerEvents h ph headerHash slotNo blockNo events = do
+    forM_ events $ \event -> do
+      case fromAuxLedgerEvent event of
+        Nothing -> pure ()
+        Just e -> do
+          let chainHashToHeaderHash GenesisHash = Origin
+              chainHashToHeaderHash (BlockHash bh) = At bh
+          let anchoredEvent = AnchoredEvent (getOneEraHash <$> chainHashToHeaderHash ph) (getOneEraHash headerHash) slotNo blockNo e
+          catch (BS.hPut h $ serializeAnchoredEvent (eventCodecVersion event) anchoredEvent) $ \case
+            -- If the client closes the socket, we continue running the node, but ignore the events.
+            IOError { ioe_type = ResourceVanished } -> do
+              pure ()
+            err -> do
+              print err
+              throwIO err
