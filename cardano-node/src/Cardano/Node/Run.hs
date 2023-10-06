@@ -206,7 +206,7 @@ handleNodeWithTracers
   :: ( TraceConstraints blk
      , Api.Protocol IO blk
      )
-  => LedgerEventHandler IO (ExtLedgerState blk)
+  => LedgerEventHandler IO (ExtLedgerState blk) blk
   -> PartialNodeConfiguration
   -> NodeConfiguration
   -> SomeConsensusProtocol
@@ -343,7 +343,7 @@ handlePeersListSimple tr nodeKern = forever $ do
 
 handleSimpleNode
   :: forall blk p2p . Api.Protocol IO blk
-  => LedgerEventHandler IO (ExtLedgerState blk)
+  => LedgerEventHandler IO (ExtLedgerState blk) blk
   -> Api.ProtocolInfoArgs IO blk
   -> NetworkP2PMode p2p
   -> Tracers RemoteConnectionId LocalConnectionId blk p2p

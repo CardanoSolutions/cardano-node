@@ -46,6 +46,7 @@ let
           cabal
           tullia
           nix-systems
+          pkgs.cargo
         ];
 
         withHoogle = true;

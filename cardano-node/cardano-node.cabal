@@ -235,6 +235,10 @@ executable reward-history
   build-depends:        base >= 4.14 && < 4.17
                       , cardano-node
                       , network
+                      , containers
+                      , bytestring
+                      , base16-bytestring
+                      , cardano-ledger-core
 
 test-suite cardano-node-test
   import:               project-config
