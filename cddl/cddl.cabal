@@ -35,7 +35,7 @@ library
   import:               project-config
   hs-source-dirs:       src
   install-includes:     cbits/libcddl.h
-  extra-libraries:      cddl
+--extra-libraries:      cddl
   exposed-modules:      Codec.CBOR.Schema
   other-modules:        Paths_cddl
   autogen-modules:      Paths_cddl
