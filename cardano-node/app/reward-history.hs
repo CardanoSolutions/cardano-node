@@ -8,6 +8,7 @@ import Cardano.Node.LedgerEvent (
     foldEvent, Credential, KeyRole (Staking), StandardCrypto, EpochNo, Coin
  )
 import Control.Exception (bracket, bracketOnError)
+import Control.Monad (void)
 import Network.Socket
 import System.Environment (getArgs)
 import System.IO (IOMode (ReadMode))
@@ -34,8 +35,7 @@ main = do
         h <- socketToHandle sock ReadMode
 
         putStrLn "Getting reward history..."
-        -- void $ foldEvent h mempty $ \st e -> let r = filterRewards stakeCredential st e in print r >> pure r
-        -- void $ foldEvent h mempty $ \st e -> let r = filterRewards stakeCredential st e in print r >> pure r
+        void $ foldEvent h mempty $ \st e -> let r = filterRewards stakeCredential st e in {-print r >>-} pure r
         foldEvent h () $ \() -> \case ae@(AnchoredEvent _ _ _ _ (LedgerNewEpochEvent (LedgerStakeDistEvent _))) -> print ae; _otherEvent -> pure ()
   where
     expectStakeCredential =

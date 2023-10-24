@@ -82,8 +82,6 @@ import           Control.State.Transition (Event)
 import           Data.ByteString.Short(ShortByteString)
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.ByteString  as BS
-import qualified Data.ByteString.Base16 as Hex
-import qualified Data.Map.Strict as Map
 import           Data.SOP (All, K (..))
 import           Data.SOP.Strict (NS(..), hcmap, hcollapse)
 import qualified Data.Set as Set
@@ -590,9 +588,8 @@ toAlonzoEventShelley evt =
       Just LedgerBody
     ShelleyLedgerEventBBODY (ShelleyInAlonzoEvent (Shelley.LedgersEvent (Shelley.LedgerEvent (Shelley.UtxowEvent (WrappedShelleyEraEvent (Shelley.UtxoEvent (UtxosEvent (Alonzo.FailedPlutusScriptsEvent _plutusDebugList)))))))) ->
       Just LedgerBody
-    -- TODO Constructor of AlonzoUtxosEvent (TotalDeposits) is not exposed yet by cardano-ledger.
-    -- ShelleyLedgerEventBBODY (ShelleyInAlonzoEvent (Shelley.LedgersEvent (Shelley.LedgerEvent (Shelley.UtxowEvent (WrappedShelleyEraEvent (Shelley.UtxoEvent (UtxosEvent (Alonzo.TotalDeposits _txBodyHash _coin)))))))) ->
-    --   Just LedgerBody
+    ShelleyLedgerEventBBODY (ShelleyInAlonzoEvent (Shelley.LedgersEvent (Shelley.LedgerEvent (Shelley.UtxowEvent (WrappedShelleyEraEvent (Shelley.UtxoEvent (UtxosEvent (Alonzo.TotalDeposits _txBodyHash _coin)))))))) ->
+      Just LedgerBody
 
     ShelleyLedgerEventBBODY (ShelleyInAlonzoEvent (Shelley.LedgersEvent (Shelley.LedgerEvent (Shelley.DelegsEvent (Shelley.DelplEvent _))))) ->
       -- TODO Constructors of ShelleyDelplEvent (PoolEvent and DelegEvent) not exposed by
@@ -619,7 +616,7 @@ toConwayEventShelley
      , Event (Ledger.EraRule "UTXOS" era) ~ AlonzoUtxosEvent era
      -- , Event (Ledger.EraRule "PPUP" era) ~ Shelley.PpupEvent era
      -- , Event (Ledger.EraRule "DELEGS" era) ~ Conway.ConwayDelegsEvent era
-     , Event (Ledger.EraRule "TALLY" era) ~ ()
+     -- , Event (Ledger.EraRule "GOV" era) ~ ()
      )
   => WrapLedgerEvent (ShelleyBlock proto era)
   -> Maybe (LedgerEvent (EraCrypto era))
@@ -660,10 +657,12 @@ toConwayEventShelley evt =
       Just LedgerBody
     ShelleyLedgerEventBBODY (ShelleyInAlonzoEvent (Shelley.LedgersEvent (Shelley.LedgerEvent (Conway.UtxowEvent (WrappedShelleyEraEvent (Shelley.UtxoEvent (UtxosEvent (Alonzo.FailedPlutusScriptsEvent _plutusDebugList)))))))) ->
       Just LedgerBody
-    ShelleyLedgerEventBBODY (ShelleyInAlonzoEvent (Shelley.LedgersEvent (Shelley.LedgerEvent (Conway.TallyEvent ())))) ->
+    ShelleyLedgerEventBBODY (ShelleyInAlonzoEvent (Shelley.LedgersEvent (Shelley.LedgerEvent (Conway.UtxowEvent (WrappedShelleyEraEvent (Shelley.UtxoEvent (UtxosEvent (Alonzo.TotalDeposits _ _)))))))) ->
+      Just LedgerBody
+    ShelleyLedgerEventBBODY (ShelleyInAlonzoEvent (Shelley.LedgersEvent (Shelley.LedgerEvent (Conway.GovEvent _)))) ->
       Nothing
-    ShelleyLedgerEventBBODY (ShelleyInAlonzoEvent (Shelley.LedgersEvent (Shelley.LedgerEvent (Conway.DelegsEvent _)))) ->
-      -- TODO Constructors of ShelleyDelplEvent (PoolEvent and DelegEvent) not exposed by cardano-ledger.
+    ShelleyLedgerEventBBODY (ShelleyInAlonzoEvent (Shelley.LedgersEvent (Shelley.LedgerEvent (Conway.CertsEvent _)))) ->
+      -- TODO Constructors of ShelleyDelplEvent (PoolEvent and CertsEvent) not exposed by cardano-ledger.
       Just LedgerBody
  where
   liftNewEpoch = Just . LedgerNewEpochEvent
