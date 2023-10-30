@@ -47,6 +47,7 @@ module Cardano.Node.LedgerEvent (
   , SlotNo (..)
   , BlockNo (..)
   , StandardCrypto
+  , WithOrigin (..)
   , serialize'
   ) where
 

@@ -1,5 +1,4 @@
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
 
@@ -72,8 +71,10 @@ type StakeCredential = Credential 'Staking StandardCrypto
 genAnchoredEvent :: Hedgehog.Gen AnchoredEvent
 genAnchoredEvent =
   AnchoredEvent
-    <$> genBlockHeaderHash
+    <$> (At <$> genBlockHeaderHash)
+    <*> genBlockHeaderHash
     <*> genSlotNo
+    <*> genBlockNo
     <*> Gen.choice (mconcat
       [ fmap LedgerNewEpochEvent <$> genLedgerNewEpochEvent
       , fmap LedgerRewardUpdateEvent <$> genLedgerRewardUpdateEvent
@@ -164,6 +165,10 @@ genScriptHash =
 genSlotNo :: Hedgehog.Gen SlotNo
 genSlotNo =
   fromIntegral <$> Gen.word64 Range.constantBounded
+
+genBlockNo :: Hedgehog.Gen BlockNo
+genBlockNo =
+  fromIntegral <$> Gen.int Range.constantBounded
 
 genStakeDistribution :: Hedgehog.Gen (Map StakeCredential Coin)
 genStakeDistribution =
