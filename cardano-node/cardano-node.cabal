@@ -281,6 +281,8 @@ test-suite cardano-node-test
                       , vector
                       , yaml
 
+  extra-libraries:      cddl
+
   other-modules:        Test.Cardano.Config.Mainnet
                         Test.Cardano.Node.FilePermissions
                         Test.Cardano.Node.Gen

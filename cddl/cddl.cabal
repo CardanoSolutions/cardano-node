@@ -10,14 +10,7 @@ author:                 KtorZ <matthias.benkort@cardanofoundation.org>
 maintainer:             matthias.benkort@cardanofoundation.org
 license:                Apache-2.0
 license-files:          LICENSE
-build-type:             Custom
-extra-source-files:     Setup.hs
-                        cbits/libcddl.h
-
-custom-setup
-  setup-depends:        , base
-                        , directory
-                        , Cabal
+extra-source-files:     cbits/libcddl.h
 
 common project-config
   default-language:     Haskell2010
@@ -35,7 +28,7 @@ library
   import:               project-config
   hs-source-dirs:       src
   install-includes:     cbits/libcddl.h
---extra-libraries:      cddl
+  extra-libraries:      cddl
   exposed-modules:      Codec.CBOR.Schema
   other-modules:        Paths_cddl
   autogen-modules:      Paths_cddl
