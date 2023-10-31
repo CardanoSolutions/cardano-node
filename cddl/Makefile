@@ -1,3 +1,3 @@
 all:
-	cbindgen --crate cddl > cbits/libcddl.h
+	cbindgen --crate cddl rbits >cbits/libcddl.h
 	@cat cbits/libcddl.h
