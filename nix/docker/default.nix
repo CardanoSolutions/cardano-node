@@ -29,7 +29,6 @@
 , dockerTools
 
 # The main contents of the image.
-, cardano-cli
 , cardano-node
 , scripts
 
@@ -65,7 +64,6 @@ let
       name = "image-root";
       pathsToLink = ["/"];
       paths = [
-        cardano-cli       # Provide cardano-cli capability
         bashInteractive   # Provide the BASH shell
         cacert            # X.509 certificates of public CA's
         coreutils         # Basic utilities expected in GNU OS's
@@ -133,7 +131,6 @@ in
       cp ${runNetwork}/bin/* usr/local/bin
       cp ${context}/bin/* usr/local/bin
       ln -s ${cardano-node}/bin/cardano-node usr/local/bin/cardano-node
-      ln -s ${cardano-cli}/bin/cardano-cli usr/local/bin/cardano-cli
     '';
     config = {
       EntryPoint = [ "entrypoint" ];

@@ -107,13 +107,8 @@ let
 
     nativeBuildInputs = with cardanoNodePackages; [
       nix
-      cardano-cli
       bech32
       cardano-node
-      cardano-topology
-      cardano-tracer
-      locli
-      tx-generator
       pkgs.graphviz
       python3Packages.supervisor
       python3Packages.ipython

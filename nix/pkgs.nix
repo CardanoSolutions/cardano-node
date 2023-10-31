@@ -91,8 +91,7 @@ in with final;
 
   cardanolib-py = callPackage ./cardanolib-py { };
 
-  scripts = lib.recursiveUpdate (import ./scripts.nix { inherit pkgs; })
-    (import ./scripts-submit-api.nix { inherit pkgs; });
+  scripts = import ./scripts.nix { inherit pkgs; };
 
   clusterTests = import ./workbench/tests { inherit pkgs; };
 
@@ -111,22 +110,6 @@ in with final;
         customConfigs = [ defaultConfig customConfig ];
       };
       script = "node";
-    };
-
-  submitApiDockerImage =
-    let
-      defaultConfig = {
-        socketPath = "/node-ipc/node.socket";
-        listenAddress = "0.0.0.0";
-      };
-    in
-    callPackage ./docker/submit-api.nix {
-      exe = "cardano-submit-api";
-      scripts = import ./scripts-submit-api.nix {
-        inherit pkgs;
-        customConfigs = [ defaultConfig customConfig ];
-      };
-      script = "submit-api";
     };
 
   all-profiles-json = workbench.profile-names-json;

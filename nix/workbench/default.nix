@@ -51,10 +51,7 @@ let
       jq
       moreutils
       procps
-      cardano-cli
-      cardano-topology
     ] ++ lib.optional (!pkgs.stdenv.hostPlatform.isDarwin) db-analyser
-      ++ [ locli ]
     );
 
   runWorkbench =

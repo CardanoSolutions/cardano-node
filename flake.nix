@@ -129,9 +129,8 @@
           # add some executables from other relevant packages
           inherit (bech32.components.exes) bech32;
           inherit (ouroboros-consensus-cardano.components.exes) db-analyser db-synthesizer db-truncater;
-          # add cardano-node and cardano-cli with their git revision stamp
+          # add cardano-node with its git revision stamp
           cardano-node = set-git-rev project.exes.cardano-node;
-          cardano-cli = set-git-rev cardano-cli.components.exes.cardano-cli;
         });
 
       mkCardanoNodePackages = project: (collectExes project) // {
@@ -162,29 +161,16 @@
           inherit pkgs;
         };
 
-        checks = flattenTree project.checks //
-          # Linux only checks:
-          (optionalAttrs hostPlatform.isLinux (
-            prefixNamesWith "nixosTests/" (mapAttrs (_: v: v.${system} or v) nixosTests)
-          ))
-          # checks run on default system only;
-          // (optionalAttrs (system == defaultSystem) {
-          hlint = pkgs.callPackage pkgs.hlintCheck {
-            inherit (project.args) src;
-          };
-        });
+        checks = flattenTree project.checks;
 
         exes = (collectExes project) // {
           inherit (pkgs) cabalProjectRegenerate checkCabalProject;
           "dockerImages/push" = import ./.buildkite/docker-build-push.nix {
             hostPkgs = import hostNixpkgs { inherit system; };
-            inherit (pkgs) dockerImage submitApiDockerImage;
+            inherit (pkgs) dockerImage;
           };
           "dockerImage/node/load" = pkgs.writeShellScript "load-docker-image" ''
             docker load -i ${pkgs.dockerImage} $@
-          '';
-          "dockerImage/submit-api/load" = pkgs.writeShellScript "load-submit-docker-image" ''
-            docker load -i ${pkgs.submitApiDockerImage} $@
           '';
         } // flattenTree (pkgs.scripts // {
           # `tests` are the test suites which have been built.
@@ -212,7 +198,6 @@
           in
           {
             "dockerImage/node" = pkgs.dockerImage;
-            "dockerImage/submit-api" = pkgs.submitApiDockerImage;
 
             ## This is a very light profile, no caching&pinning needed.
             workbench-ci-test =
@@ -265,7 +250,7 @@
                   roots.project = project.roots;
                   plan-nix.project = project.plan-nix;
                 };
-                profiled = lib.genAttrs [ "cardano-node" "tx-generator" "locli" ] (n:
+                profiled = lib.genAttrs [ "cardano-node" ] (n:
                   packages.${n}.passthru.profiled
                 );
                 asserted = lib.genAttrs [ "cardano-node" ] (n:
@@ -414,16 +399,12 @@
           customConfig.haskellNix
         ];
         cardanoNodePackages = mkCardanoNodePackages final.cardanoNodeProject;
-        inherit (final.cardanoNodePackages) cardano-node cardano-cli cardano-submit-api cardano-tracer bech32 locli db-analyser;
+        inherit (final.cardanoNodePackages) cardano-node bech32 db-analyser;
       };
       nixosModules = {
         cardano-node = { pkgs, lib, ... }: {
           imports = [ ./nix/nixos/cardano-node-service.nix ];
           services.cardano-node.cardanoNodePackages = lib.mkDefault (mkCardanoNodePackages flake.project.${pkgs.system});
-        };
-        cardano-submit-api = { pkgs, lib, ... }: {
-          imports = [ ./nix/nixos/cardano-submit-api-service.nix ];
-          services.cardano-submit-api.cardanoNodePackages = lib.mkDefault (mkCardanoNodePackages flake.project.${pkgs.system});
         };
       };
     };
