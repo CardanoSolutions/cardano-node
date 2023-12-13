@@ -95,11 +95,12 @@ import           Ouroboros.Consensus.Cardano.Block (AllegraEra, AlonzoEra,
                      BabbageEra, CardanoEras, ConwayEra, HardForkBlock,
                      MaryEra, ShelleyEra)
 import           Ouroboros.Consensus.HardFork.Combinator.AcrossEras
-                     (OneEraLedgerEvent(..), getOneEraHash, getOneEraLedgerEvent)
+                     (OneEraLedgerEvent(..), getOneEraHash, getOneEraLedgerEvent, OneEraHash)
 import           Ouroboros.Consensus.Ledger.Abstract (AuxLedgerEvent,
                      LedgerEventHandler(..))
 import qualified Ouroboros.Consensus.Ledger.Abstract as Abstract
-import           Ouroboros.Consensus.Ledger.Extended (ExtLedgerState)
+import qualified Ouroboros.Consensus.Protocol.Abstract as Abstract
+import           Ouroboros.Consensus.Ledger.Extended (ExtLedgerState, AuxExtLedgerEvent(AuxLedgerEvent, AuxConsensusEvent))
 import           Ouroboros.Consensus.Shelley.Ledger (ShelleyBlock,
                      ShelleyLedgerEvent (..))
 import           Ouroboros.Consensus.TypeFamilyWrappers
@@ -109,7 +110,9 @@ import qualified Cardano.Ledger.Conway.Rules as Conway
 import qualified Cardano.Ledger.Shelley.API as ShelleyAPI
 import Cardano.Ledger.Alonzo.Rules (AlonzoBbodyEvent (ShelleyInAlonzoEvent), AlonzoUtxowEvent (WrappedShelleyEraEvent), AlonzoUtxoEvent (UtxosEvent), AlonzoUtxosEvent)
 import GHC.IO.Exception (IOException(IOError, ioe_type), IOErrorType (ResourceVanished))
-import Ouroboros.Network.Block (ChainHash(GenesisHash, BlockHash))
+import Ouroboros.Network.Block (ChainHash(GenesisHash, BlockHash), HeaderHash)
+import Ouroboros.Consensus.Block.Abstract (BlockProtocol)
+import Ouroboros.Consensus.HardFork.Combinator.Basics (HardForkProtocol)
 
 type LedgerState crypto =
   ExtLedgerState (HardForkBlock (CardanoEras crypto))
@@ -337,6 +340,22 @@ ledgerNewEpochEventName = \case
 ledgerRewardUpdateEventName :: LedgerRewardUpdateEvent crypto -> Text
 ledgerRewardUpdateEventName = \case
   LedgerIncrementalRewards {} -> "LedgerIncrementalRewards"
+
+-- fromAuxExtLedgerEvent
+--   :: forall xs crypto. (All ConvertLedgerEvent xs, crypto ~ StandardCrypto)
+--   => AuxExtLedgerEvent (Abstract.LedgerState (HardForkBlock xs)) (HardForkBlock xs)
+--   -> Maybe (LedgerEvent crypto)
+-- fromAuxExtLedgerEvent
+--   :: AuxExtLedgerEvent (Abstract.LedgerState (HardForkBlock xs)) (HardForkBlock xs)
+--   -> Maybe (LedgerEvent StandardCrypto)
+fromAuxExtLedgerEvent
+  :: (All ConvertLedgerEvent xs, AuxLedgerEvent l ~ OneEraLedgerEvent xs)
+  => AuxExtLedgerEvent l c
+  -> Maybe (LedgerEvent StandardCrypto)
+fromAuxExtLedgerEvent event =
+  case event of
+    AuxLedgerEvent e -> fromAuxLedgerEvent e
+    AuxConsensusEvent (TPraosEvent _e) -> undefined
 
 fromAuxLedgerEvent
   :: forall xs crypto. (All ConvertLedgerEvent xs, crypto ~ StandardCrypto)
@@ -687,11 +706,18 @@ instance ConvertLedgerEvent (ShelleyBlock proto (BabbageEra StandardCrypto)) whe
 instance ConvertLedgerEvent (ShelleyBlock proto (ConwayEra StandardCrypto)) where
   toLedgerEvent = toConwayEventShelley
 
-eventCodecVersion ::
+eventCodecVersion
+  :: AuxExtLedgerEvent (ExtLedgerState (HardForkBlock xs)) (HardForkBlock xs)
+  -> Version
+eventCodecVersion = \case
+  AuxLedgerEvent e -> undefined
+  AuxConsensusEvent e -> undefined
+
+eventCodecVersion' ::
      forall crypto. Crypto crypto
   => OneEraLedgerEvent (CardanoEras crypto)
   -> Version
-eventCodecVersion = \case
+eventCodecVersion' = \case
   OneEraLedgerEvent (          S(Z{})     ) -> eraProtVerLow @(ShelleyEra crypto)
   OneEraLedgerEvent (        S(S(Z{}))    ) -> eraProtVerLow @(AllegraEra crypto)
   OneEraLedgerEvent (      S(S(S(Z{})))   ) -> eraProtVerLow @(MaryEra crypto)
@@ -769,9 +795,19 @@ foldEvent h st0 fn =
         st' <- fn st event
         go st' events
 
+-- withLedgerEventsServerStream
+--   :: ( All ConvertLedgerEvent xs1
+--      , AuxLedgerEvent l ~ AuxExtLedgerEvent (Abstract.LedgerState (HardForkBlock xs1)) (HardForkBlock xs1)
+--      , HeaderHash b ~ OneEraHash xs2
+--      , HeaderHash l ~ OneEraHash xs3
+--      )
+--  => PortNumber
+--  -> (LedgerEventHandler IO l b -> IO a)
+--  -> IO a
 withLedgerEventsServerStream
-  :: PortNumber
-  -> (LedgerEventHandler IO (LedgerState StandardCrypto) (HardForkBlock (CardanoEras crypto)) -> IO ())
+  :: All ConvertLedgerEvent xs
+  => PortNumber
+  -> (LedgerEventHandler IO (ExtLedgerState (HardForkBlock xs)) (HardForkBlock xs) -> IO ())
   -> IO ()
 withLedgerEventsServerStream port handler = do
   withSocketsDo $ do
@@ -791,15 +827,17 @@ withLedgerEventsServerStream port handler = do
 
   closeSockets = close
 
+  -- writeLedgerEvents :: Handler -> ChainHash b -> OneEraHash xs -> SlotNo -> BlockNo -> [AuxExtLedgerEvent (Abstract.LedgerState (HardForkBlock xs)) (HardForkBlock xs)] -> IO ()
   writeLedgerEvents h ph headerHash slotNo blockNo events = do
     forM_ events $ \event -> do
-      case fromAuxLedgerEvent event of
+      case fromAuxExtLedgerEvent event of
         Nothing -> pure ()
         Just e -> do
           let chainHashToHeaderHash GenesisHash = Origin
               chainHashToHeaderHash (BlockHash bh) = At bh
           let anchoredEvent = AnchoredEvent (getOneEraHash <$> chainHashToHeaderHash ph) (getOneEraHash headerHash) slotNo blockNo e
-          catch (BS.hPut h $ serializeAnchoredEvent (eventCodecVersion event) anchoredEvent) $ \case
+          -- catch (BS.hPut h $ serializeAnchoredEvent (eventCodecVersion event) anchoredEvent) $ \case
+          catch (BS.hPut h $ serializeAnchoredEvent undefined anchoredEvent) $ \case
             -- If the client closes the socket, we continue running the node, but ignore the events.
             IOError { ioe_type = ResourceVanished } -> do
               pure ()

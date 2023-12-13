@@ -57,8 +57,8 @@ package bitvec
 source-repository-package
     type: git
     location: https://github.com/CardanoSolutions/ouroboros-consensus
-    tag: 019a99b71f9d009e1a2101d09f6be0e75a33ea96
-    --sha256: 1y39a5zp8g8bra5nss5n8wwjla3x8hc8xwnn3r8wwvkxsrgplgw4
+    tag: d23011ac1687d9fdc4ae11c07b0746ea85a0a3d4
+    --sha256: 0000000000000000000000000000000000000000000000000000
     subdir:
       ouroboros-consensus
       ouroboros-consensus-cardano
