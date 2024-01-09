@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
 
 module Test.Cardano.Node.LedgerEvent where
@@ -9,27 +10,48 @@ import           Prelude
 import           Cardano.Node.LedgerEvent
 
 import           Cardano.Crypto.Hash (Hash, HashAlgorithm, hashFromBytes)
+import           Cardano.Ledger.Alonzo.Rules (AlonzoBbodyEvent (ShelleyInAlonzoEvent))
+import qualified Cardano.Ledger.Conway.Rules as Conway
+import qualified Cardano.Ledger.Shelley.Rules as Shelley
+import           Cardano.Ledger.Shelley.API (InstantaneousRewards (..), KeyHash (..),
+                   ScriptHash (..))
+import           Cardano.Ledger.Shelley.Rules (RupdEvent (..), ShelleyEpochEvent (..),
+                   ShelleyMirEvent (..), ShelleyNewEpochEvent, ShelleyPoolreapEvent (..),
+                   ShelleyTickEvent (..))
 import qualified Codec.CBOR.Schema as CDDL
+import           Control.Monad.IO.Class (liftIO)
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString.Base16 as Hex
 import           Data.ByteString.Lazy (fromStrict)
 import           Data.ByteString.Short (ShortByteString, toShort)
+import qualified Data.ByteString.Short as SB
+import           Data.Char (ord)
 import           Data.Foldable (for_, toList)
+import           Data.IORef (modifyIORef, newIORef, readIORef)
 import           Data.Map (Map)
 import           Data.Maybe (fromJust)
 import           Data.Set (Set)
+import           Data.SOP.Index (Index, injectNS)
 import           Data.String (IsString (..))
 import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
-import           Hedgehog (Property, discover, footnote)
+import           Hedgehog ((===), Property, discover, footnote)
 import qualified Hedgehog
 import qualified Hedgehog.Extras.Test.Process as Hedgehog
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Internal.Property as Hedgehog
 import qualified Hedgehog.Range as Range
+import           Ouroboros.Consensus.Cardano.Block (CardanoEras, HardForkBlock)
+import           Ouroboros.Consensus.HardFork.Combinator.Ledger ()
+import           Ouroboros.Consensus.HardFork.Combinator.AcrossEras (OneEraHash (OneEraHash), OneEraLedgerEvent (OneEraLedgerEvent))
+import           Ouroboros.Consensus.Ledger.Abstract (AuxLedgerEvent, LedgerEventHandler (handleLedgerEvent), LedgerState)
+import           Ouroboros.Consensus.Shelley.Ledger (ShelleyBlock, ShelleyLedgerEvent (..))
+import           Ouroboros.Consensus.TypeFamilyWrappers (WrapLedgerEvent (WrapLedgerEvent))
+import           Ouroboros.Network.Block (ChainHash (BlockHash, GenesisHash), HeaderHash)
 import           System.FilePath ((</>))
 import           System.IO.Unsafe (unsafePerformIO)
+import           Text.Printf (printf)
 
 specification :: Text
 specification =
@@ -67,6 +89,41 @@ prop_LedgerEvent_CDDL_conformance =
         Hedgehog.footnote cbor
         Hedgehog.failure
 
+prop_LedgerEventHandler_sequentialEvents :: Property
+prop_LedgerEventHandler_sequentialEvents =
+  Hedgehog.property $ do
+
+  auxEvents <- Hedgehog.forAll $
+    Gen.list (Range.linear 2 20) $
+      Gen.list (Range.linear 1 3)
+        genAuxLedgerEvent
+
+  start <- Hedgehog.forAll $ Gen.word $ Range.constant 1 99
+
+  let slots = zip [start ..] auxEvents
+
+  anchoredEvents <- liftIO $ do
+    ref <- newIORef []
+    let writer aes = modifyIORef ref (aes :)
+        handler = handleLedgerEvent $ mkLedgerEventHandler writer
+    for_ slots $ \(s, es) -> do
+      let p = dummyChainHash (pred s)
+          h = dummyHeaderHash s
+      handler p h (fromIntegral s) 1 es
+    map versionedData . reverse <$> readIORef ref
+
+  let prevs = map prevBlockHeaderHash anchoredEvents
+      currs = map (At . blockHeaderHash) anchoredEvents
+
+  tail prevs === init currs
+
+dummyHeaderHash :: Word -> HeaderHash (HardForkBlock (CardanoEras StandardCrypto))
+dummyHeaderHash = OneEraHash . SB.pack . map (fromIntegral . ord) . printf "%032d"
+
+dummyChainHash :: Word -> ChainHash (HardForkBlock (CardanoEras StandardCrypto))
+dummyChainHash 0 = GenesisHash
+dummyChainHash i = BlockHash $ dummyHeaderHash i
+
 --
 -- Generators
 --
@@ -74,6 +131,24 @@ prop_LedgerEvent_CDDL_conformance =
 type StakePoolId = KeyHash 'StakePool StandardCrypto
 
 type StakeCredential = Credential 'Staking StandardCrypto
+
+genAuxLedgerEvent :: forall xs. Hedgehog.Gen (AuxLedgerEvent (LedgerState (HardForkBlock xs)))
+genAuxLedgerEvent =
+  Gen.choice
+    -- TODO: Add more types
+    (
+    [ injectLedgerEvent undefined . ShelleyLedgerEventTICK . TickNewEpochEvent <$> (Conway.TotalRewardEvent <$> genEpoch <*> genRewardDistribution)
+    , injectLedgerEvent undefined . ShelleyLedgerEventBBODY . ShelleyInAlonzoEvent . Shelley.LedgersEvent . Shelley.LedgerEvent . Conway.GovEvent <$> pure _
+    ]
+    :: [Hedgehog.Gen (AuxLedgerEvent (LedgerState (HardForkBlock xs)))]
+    )
+  where
+    injectLedgerEvent :: Index xs blk -> AuxLedgerEvent (LedgerState blk) -> OneEraLedgerEvent xs
+    injectLedgerEvent index =
+          OneEraLedgerEvent
+        . injectNS index
+        . WrapLedgerEvent
+
 
 genAnchoredEvents :: Hedgehog.Gen AnchoredEvents
 genAnchoredEvents =

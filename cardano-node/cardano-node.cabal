@@ -243,7 +243,10 @@ test-suite cardano-node-test
                       , base16-bytestring
                       , cardano-crypto-class
                       , cardano-api
+                      , cardano-ledger-alonzo
+                      , cardano-ledger-conway
                       , cardano-ledger-core
+                      , cardano-ledger-shelley
                       , cardano-node
                       , cardano-slotting
                       , cddl
@@ -260,6 +263,7 @@ test-suite cardano-node-test
                       , ouroboros-consensus-diffusion
                       , ouroboros-network
                       , ouroboros-network-api
+                      , sop-extras
                       , strict-sop-core
                       , text
                       , time

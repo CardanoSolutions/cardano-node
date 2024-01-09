@@ -733,8 +733,10 @@ instance DecCBOR AnchoredEvents where
       <! From
       <! From
 
-data Versioned a = Versioned Version a
-  deriving (Eq, Ord, Show)
+data Versioned a = Versioned
+  { versionedVersion :: Version
+  , versionedData :: a
+  } deriving (Eq, Ord, Show)
 
 serializeVersioned :: EncCBOR a => Versioned a -> ByteString
 serializeVersioned (Versioned version x) =
