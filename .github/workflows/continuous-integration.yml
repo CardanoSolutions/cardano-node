@@ -1,0 +1,62 @@
+name: Continuous Integration
+
+env:
+  NIX_SHELL: "github:CardanoSolutions/devx#ghc94-static-minimal-iog"
+  NIX_OPTS: "--no-write-lock-file --refresh"
+
+on:
+  push:
+    branches: [ "master", "v*.*.*" ]
+
+jobs:
+  continuous_integration:
+    strategy:
+      matrix:
+        os: [ linux, macos ]
+        arch: [ x86_64, aarch64 ]
+        compiler: [ ghc948 ]
+        exclude:
+          - os: linux
+            arch: aarch64
+          - os: macos
+            arch: x86_64
+
+    runs-on: ${{ (matrix.os == 'linux' && 'ubuntu-latest') || 'macos-latest' }}
+
+    steps:
+
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Install Nix
+      uses: cachix/install-nix-action@v22
+      with:
+        extra_nix_config: |
+          trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
+          substituters = https://cache.iog.io/ https://cache.nixos.org/
+        nix_path: nixpkgs=channel:nixos-unstable
+
+    - name: Prepare Cache
+      shell: bash
+      run: |
+        if [ "${{ matrix.os }}" == "macos" ]; then
+          nix develop $NIX_SHELL $NIX_OPTS --command bash -c "cat /nix/store/l0np941gvmpqcgxankbgb7zpl4mj332v-cabal.project.local >> cabal.project.local"
+        else
+          nix develop $NIX_SHELL $NIX_OPTS --command bash -c "cat /nix/store/vd865r55pdbndjwh994h90m35qq77x44-cabal.project.local >> cabal.project.local"
+        fi
+        nix develop $NIX_SHELL $NIX_OPTS --command bash -c "cabal update && cabal freeze"
+
+    - name: Cache
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cabal-static/packages
+          ~/.cabal-static/store
+        key: cabal-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.compiler }}-${{ hashFiles('cabal.project.freeze') }}
+        restore-keys: |
+          cabal-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.compiler }}
+
+    - name: Build
+      shell: bash
+      run: |
+        nix develop $NIX_SHELL $NIX_OPTS --command bash -c "cabal build cardano-node:exe:cardano-node"
